@@ -77,8 +77,28 @@ function montarNavegacao() {
 }
 
 function pintar(html) {
-  document.getElementById("cnt").innerHTML = html;
-  window.scrollTo({ top: 0 });
+  const cnt = document.getElementById("cnt");
+  // Re-desenho causado por dado novo (não por navegação): sem recomeçar as
+  // animações de entrada e sem jogar a página pro topo.
+  cnt.classList.toggle("sem-anim", S.silencioso);
+  cnt.innerHTML = html;
+  if (!S.silencioso) window.scrollTo({ top: 0 });
+}
+
+/* Atualização vinda do banco. Várias chegam em sequência (vendas, custos,
+   fechamentos, e cada gravação ainda volta como confirmação), então agrupa
+   numa só, e não mexe na tela se a pessoa está digitando. */
+let timerDados = null;
+function dadosMudaram() {
+  clearTimeout(timerDados);
+  timerDados = setTimeout(() => {
+    if (!S.pronto) return;
+    const a = document.activeElement;
+    if (a && a.closest && a.closest("#cnt") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    // saindo do "Carregando…" a tela entra animada; depois disso, em silêncio
+    S.silencioso = !S.carregandoTela;
+    try { render(); } finally { S.silencioso = false; }
+  }, 160);
 }
 
 function render() {
@@ -107,6 +127,15 @@ function render() {
   if (soJornada && !TELAS_JORNADA[S.tela]) S.tela = "mentorados";
 
   if (ehJornada() && SESSAO.empresaId && S.tela === "config") S.tela = "visao";
+  // Telas que dependem do mês esperam ele chegar do banco. Sem isso a tela
+  // pisca o estado "nada lançado" antes de mostrar os dados.
+  const soJornadaSemEmpresa = ehJornada() && !SESSAO.empresaId;
+  if (!soJornadaSemEmpresa && ["visao", "vendas", "pend", "custos"].includes(S.tela) && !DB.mesCarregado()) {
+    S.carregandoTela = true;
+    pintar(faixaVisualizacao() + carregando());
+    return;
+  }
+  S.carregandoTela = false;
   pintar(faixaVisualizacao() + ({ visao, vendas, pend, custos, fixos, config, mentorados, acessos })[S.tela]());
   ligar();
   // A Jornada só lê: gravar o fechamento seria escrever em nome da empresa.
@@ -686,7 +715,7 @@ async function abrirEmpresa(id) {
     S.mesRef = (await DB.ultimoMesComDado()) || S.mesRef;
     DB.escutarFechamentos();
     DB.escutarMes(S.mesRef);
-    DB.quandoMudar(() => { if (S.pronto) render(); });
+    DB.quandoMudar(dadosMudaram);
     render();
   } catch (e) {
     console.error(e);
@@ -1673,7 +1702,7 @@ iniciarAuth({
       await DB.carregarBase();
       DB.escutarFechamentos();
       DB.escutarMes(S.mesRef);
-      DB.quandoMudar(() => { if (S.pronto) render(); });
+      DB.quandoMudar(dadosMudaram);
       S.pronto = true;
       render();
     } catch (e) {

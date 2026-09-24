@@ -31,6 +31,7 @@ export const D = {
 };
 
 const escutas = {};     // chave -> unsubscribe
+const carregado = { vendas: false, custos: false };   // o mês em foco já chegou do banco?
 let aoMudar = () => {};
 export function quandoMudar(fn) { aoMudar = fn; }
 
@@ -39,6 +40,7 @@ function base() { return `empresas/${SESSAO.empresaId}`; }
 function fecharEscuta(chave) {
   if (escutas[chave]) { escutas[chave](); delete escutas[chave]; }
 }
+export function mesCarregado() { return !!D.demo || (carregado.vendas && carregado.custos); }
 export function fecharTudo() {
   Object.keys(escutas).forEach(fecharEscuta);
 }
@@ -104,6 +106,7 @@ export function escutarMes(mesRef) {
   D.mes = mesRef;
   D.vendas = [];
   D.custos = [];
+  carregado.vendas = false; carregado.custos = false;
 
   escutas.vendas = onSnapshot(
     query(collection(db, base(), "vendas"), where("mesRef", "==", mesRef)),
@@ -112,6 +115,7 @@ export function escutarMes(mesRef) {
       rastrearSincronizacao("vendas", snap);
       D.vendas = snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+      carregado.vendas = true;
       aoMudar();
     },
     e => console.error("Falha ao escutar vendas.", e)
@@ -124,6 +128,7 @@ export function escutarMes(mesRef) {
       rastrearSincronizacao("custos", snap);
       D.custos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.dataPagamento || "").localeCompare(b.dataPagamento || ""));
+      carregado.custos = true;
       aoMudar();
     },
     e => console.error("Falha ao escutar custos.", e)
@@ -364,7 +369,18 @@ export async function gerarOcorrencias(mesRef) {
 // Mês fechado não muda mais, então congelar o total aqui é seguro e é o que
 // faz o gráfico do ano custar doze leituras.
 export async function gravarFechamento(mesRef) {
+  // Nunca grava a partir de um mês que ainda não chegou do banco: seria
+  // congelar zeros por cima de um fechamento bom.
+  if (D.demo || D.mes !== mesRef || !carregado.vendas || !carregado.custos) return;
   const r = resumoDoMes();
+  // Só grava se o número mudou. Sem isso, cada gravação dispara uma
+  // atualização do banco, que re-desenha a tela, que agenda outra gravação:
+  // um laço sem fim, que aparecia como a tela piscando.
+  const f = D.fechamentos[mesRef];
+  const igual = f && ["venda", "base", "comissoes", "lucroBruto", "naoPrevisto", "fixos", "imposto", "lucroLiquido", "nVendas"]
+    .every(k => arredondar2(f[k] || 0) === arredondar2(r[k] || 0));
+  if (igual) return;
+  if (!f && !r.nVendas && !r.custoTotal) return;   // mês vazio e sem fechamento: nada a congelar
   await emSegundoPlano(setDoc(doc(db, base(), "fechamentos", mesRef), {
     venda: r.venda, base: r.base, comissoes: r.comissoes, lucroBruto: r.lucroBruto,
     naoPrevisto: r.naoPrevisto, fixos: r.fixos, imposto: r.imposto,

@@ -446,3 +446,12 @@ input[type=checkbox]{width:auto;height:auto}
   .card table{min-width:540px}
   .modal .cnt .campo input,.modal .cnt .campo select{width:100%}
 }
+
+/* Re-desenho por dado novo: mostra o estado final sem recomeçar a animação de
+   entrada (a tela piscava a cada atualização do banco). */
+.sem-anim .anim{animation:none!important;opacity:1;transform:none}
+.sem-anim .lc .linha{animation:none!important;stroke-dashoffset:0}
+.sem-anim .lc .area,.sem-anim .lc .pt{animation:none!important;opacity:1}
+.sem-anim .chart .b{animation:none!important;transform:scaleY(1)}
+.sem-anim .rosca circle.f{animation:none!important;stroke-dashoffset:var(--do)}
+.sem-anim .bar i{animation:none!important;width:var(--w)}
