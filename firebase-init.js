@@ -19,16 +19,31 @@ import {
 // Essas chaves são públicas por design no Firebase Web. A segurança vem das
 // firestore.rules, não de esconder esta config.
 export const firebaseConfig = {
-  apiKey: "COLE_AQUI",
-  authDomain: "COLE_AQUI.firebaseapp.com",
-  projectId: "COLE_AQUI",
-  storageBucket: "COLE_AQUI.firebasestorage.app",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI"
+  apiKey: "AIzaSyAXk_Amh7YnaZXLJdUDMgblMSuJ_dJ48To",
+  authDomain: "financeirojornadamilhao-d1470.firebaseapp.com",
+  projectId: "financeirojornadamilhao-d1470",
+  storageBucket: "financeirojornadamilhao-d1470.firebasestorage.app",
+  messagingSenderId: "607271016513",
+  appId: "1:607271016513:web:aa30c49e7059e1053f0ec0"
 };
 
 export const firebaseApp = initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
+
+// Segunda instância do Firebase, usada só para criar acesso de outra pessoa.
+//
+// O motivo: `createUserWithEmailAndPassword` deixa a sessão logada como o
+// usuário recém-criado. Chamando pelo app principal, quem cria o acesso é
+// derrubado da própria conta no meio do cadastro. Numa instância separada, a
+// sessão principal não é tocada.
+//
+// A alternativa seria o Admin SDK numa Cloud Function, que exige o plano
+// Blaze. Este projeto roda no gratuito de propósito.
+let appCriador = null;
+export function authCriador() {
+  if (!appCriador) appCriador = initializeApp(firebaseConfig, "criador");
+  return getAuth(appCriador);
+}
 
 // Cache local persistente (IndexedDB): o que já veio continua disponível se a
 // internet cair, e reabrir a mesma tela traz só o que mudou de verdade. É uma

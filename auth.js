@@ -115,6 +115,44 @@ export async function sair() {
   await signOut(auth);
 }
 
+/* ============ criar acesso de outra pessoa ============ */
+// Roda na instância separada do Firebase (ver firebase-init.js): sem isso,
+// quem está cadastrando é derrubado da própria sessão no meio do cadastro.
+//
+// Devolve o uid da conta criada. Quem grava o vínculo em /usuarios é o
+// chamador, usando a sessão principal, porque é ela que a regra reconhece
+// como equipe da Jornada.
+export async function criarContaAuth(email, senha) {
+  const { authCriador } = await import("./firebase-init.js");
+  const { createUserWithEmailAndPassword, signOut: sairDe } =
+    await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js");
+  const aux = authCriador();
+  try {
+    const cred = await createUserWithEmailAndPassword(aux, email, senha);
+    const uid = cred.user.uid;
+    await sairDe(aux);          // não deixa sessão pendurada na instância auxiliar
+    return uid;
+  } catch (e) {
+    try { await sairDe(aux); } catch {}
+    const cod = e.code || "";
+    if (cod.includes("email-already-in-use"))
+      throw new Error("Já existe uma conta com esse e-mail.");
+    if (cod.includes("invalid-email"))
+      throw new Error("Esse e-mail não parece válido.");
+    if (cod.includes("weak-password"))
+      throw new Error("A senha precisa de pelo menos 6 caracteres.");
+    if (cod.includes("operation-not-allowed"))
+      throw new Error("O login por e-mail e senha não está ligado no Firebase. Veja o passo 3 do README.");
+    throw new Error("Não consegui criar a conta agora.");
+  }
+}
+
+/* Envia o link de definição de senha, para quem prefere não combinar a senha
+   inicial por fora. */
+export async function enviarLinkDeSenha(email) {
+  await sendPasswordResetEmail(auth, email);
+}
+
 /* ============ tela de entrada ============ */
 function telaLogin(aviso) {
   return `<div class="login">

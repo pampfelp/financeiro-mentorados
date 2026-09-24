@@ -106,58 +106,59 @@ virar administrador por ali.
 
 ---
 
-## Passo a passo: cadastrar um mentorado
+## Cadastrar mentorado e equipe pelo sistema
 
-Por enquanto isso é feito pelo console do Firebase. Quando houver mais de
-dois ou três mentorados, vale fazer uma tela para isso.
+A tela de cadastro existe dentro do próprio sistema, para quem entra como
+**Jornada**. Nada mais precisa ser feito no console do Firebase depois do
+primeiro acesso.
 
-### 1. Criar a empresa
+### 1. Cadastrar a empresa
 
-1. Firestore → **Dados** → **Iniciar coleta** (ou o `+` ao lado de `empresas`,
-   se já existir).
-2. ID da coleção: `empresas`.
-3. ID do documento: deixe o **automático**, e **copie o ID que ele gerar**.
-   Você vai precisar dele no passo 3.
-4. Campos:
+1. Entre como Jornada. A tela inicial é **Mentorados**.
+2. Clique em **Nova empresa**.
+3. Escreva o nome. CNPJ, mês de abertura e unidades são opcionais.
+4. Clique em **Criar empresa**.
 
-   | Campo | Tipo | Valor |
-   |---|---|---|
-   | `nome` | string | Nome da empresa |
-   | `cnpj` | string | (pode deixar vazio) |
-   | `mesAbertura` | string | 2026-02 |
-   | `unidades` | array | Matriz, Marambaia, Mauriti |
-   | `autorizaJornada` | boolean | false |
-   | `logoBase64` | string | (vazio) |
-
-5. Salvar.
+As quatro linhas de custo do ramo (kit solar, instalação, vistoria e
+engenharia) já entram cadastradas.
 
 ### 2. Criar o acesso da pessoa
 
-1. **Authentication** → **Users** → **Adicionar usuário**.
-2. E-mail do mentorado. Senha: `Jornada@2026`.
-3. **Copie o User UID** que aparece na lista.
+1. Vá em **Acessos** e clique em **Novo acesso**.
+2. Escolha o **tipo**:
+   - **Mentorado**: escolha a empresa e o papel dentro dela.
+   - **Equipe Jornada**: quem trabalha na Jornada. Não tem empresa própria.
+3. Escreva nome e e-mail.
+4. Clique em **Criar acesso**.
 
-### 3. Ligar a pessoa à empresa
+O sistema cria a conta no Firebase Authentication e o vínculo com a empresa
+numa tacada só. A senha inicial é sempre **`Jornada@2026`**, e o sistema
+obriga a troca na primeira entrada.
 
-1. Firestore → **Dados** → coleção `usuarios` → **Adicionar documento**.
-2. **ID do documento: cole o User UID do passo anterior.** Tem que ser
-   exatamente ele.
-3. Campos:
+**Papéis de mentorado:**
 
-   | Campo | Tipo | Valor |
-   |---|---|---|
-   | `empresaId` | string | o ID da empresa (passo 1) |
-   | `papel` | string | `dono` |
-   | `nome` | string | nome da pessoa |
-   | `email` | string | e-mail dela |
+| Papel | O que faz |
+|---|---|
+| `dono` | Lança tudo e mexe nas configurações |
+| `financeiro` | Lança tudo, não mexe nas configurações |
+| `leitura` | Só enxerga |
 
-4. Salvar.
+### 3. Depois de criado
 
-Pronto. A pessoa entra com o e-mail dela e `Jornada@2026`, troca a senha na
-primeira entrada, e enxerga só a empresa dela.
+Clique numa pessoa na lista de Acessos para:
 
-**Papéis possíveis:** `dono` e `financeiro` leem e escrevem; `leitura` só lê;
-`jornada` é a equipe da Jornada e não tem `empresaId`.
+- trocar o papel;
+- enviar um link de troca de senha por e-mail;
+- remover o acesso.
+
+**Você não altera o próprio papel nem remove o próprio acesso.** É o que
+impede a última pessoa da Jornada de se trancar do lado de fora.
+
+**Remover um acesso** apaga o vínculo, não a conta do Firebase: a pessoa
+deixa de entrar em qualquer empresa, mas o e-mail continua existindo no
+Authentication. Apagar a conta de vez exige o Admin SDK, que só roda em
+plano pago, e por isso é feito à mão em **Authentication → Users** se
+precisar.
 
 ---
 

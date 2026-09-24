@@ -103,7 +103,10 @@ export const ICONS = {
   filtro: svg(`<path d="M4 6h16M7 12h10M10 18h4"/>`),
   sair: svg(`<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>`),
   aviso: svg(`<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>`),
-  check: svg(`<path d="M20 6L9 17l-5-5"/>`)
+  check: svg(`<path d="M20 6L9 17l-5-5"/>`),
+  pessoas: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>`),
+  pessoaMais: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>`),
+  chave: svg(`<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3l1.5 1.5-2 2 1.5 1.5-2 2-1.5-1.5-2.8 2.8"/>`)
 };
 
 /* ============ toast ============ */

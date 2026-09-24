@@ -51,7 +51,12 @@ service cloud.firestore {
     // qual empresa abrir, e não escreve nele em hipótese nenhuma.
     match /usuarios/{uid} {
       allow read: if logado() && (request.auth.uid == uid || souJornada());
-      allow create, update: if souJornada()
+      allow create: if souJornada()
+        && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
+        && request.resource.data.papel in ['dono','financeiro','leitura','jornada'];
+      // Ninguém altera o próprio vínculo: sem isso, quem é da Jornada se
+      // rebaixa por engano e ninguém mais consegue criar acesso.
+      allow update: if souJornada() && request.auth.uid != uid
         && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
         && request.resource.data.papel in ['dono','financeiro','leitura','jornada'];
       allow delete: if souJornada() && request.auth.uid != uid;   // ninguém se apaga
@@ -72,7 +77,11 @@ service cloud.firestore {
 
     // ---------- a empresa do mentorado ----------
     match /empresas/{empresaId} {
-      allow read: if podeLer(empresaId);
+      // O documento da empresa é só cadastro (nome, CNPJ, unidades, se a
+      // Jornada está autorizada). A Jornada precisa listar todas pra cadastrar
+      // mentorado e ver quem parou de lançar. O que fica protegido pela chave
+      // é o FINANCEIRO, nas subcoleções abaixo.
+      allow read: if souDaEmpresa(empresaId) || souJornada();
 
       // A Jornada cria a empresa. O mentorado edita os dados dela e a chave
       // de autorização, mas nunca cria nem apaga.
@@ -96,6 +105,10 @@ service cloud.firestore {
       // ---------- catálogo de linhas de custo ----------
       match /linhasCusto/{id} {
         allow read: if podeLer(empresaId);
+        // A Jornada cria o catálogo inicial ao cadastrar a empresa.
+        allow create: if souJornada()
+          && request.resource.data.keys().hasOnly(['nome','padrao','ordem'])
+          && texto(request.resource.data.nome, 60);
         allow write: if podeEscrever(empresaId)
           && (request.method == 'delete' || (
                request.resource.data.keys().hasOnly(['nome','padrao','ordem'])

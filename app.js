@@ -4,7 +4,8 @@
 // unidade. Clicar num gráfico refiltra os KPIs, as listas e os outros
 // gráficos: o gesto que lê é o mesmo que filtra.
 
-import { SESSAO, iniciarAuth, sair, podeEditar, ehJornada } from "./auth.js";
+import { SESSAO, SENHA_INICIAL, iniciarAuth, sair, podeEditar, ehJornada,
+  criarContaAuth, enviarLinkDeSenha } from "./auth.js";
 import * as DB from "./dados.js";
 import { D } from "./dados.js";
 import {
@@ -35,6 +36,12 @@ const TELAS = {
   config: { nome: "Configurações",   icone: "engrenagem" }
 };
 
+// A equipe da Jornada não tem empresa própria: a navegação dela é outra.
+const TELAS_JORNADA = {
+  mentorados: { nome: "Mentorados", icone: "predio" },
+  acessos:    { nome: "Acessos",    icone: "pessoas" }
+};
+
 const anoDe = m => m.slice(0, 4);
 const mesNum = m => Number(m.slice(5, 7));
 const rotuloPeriodo = () => S.dia
@@ -42,17 +49,22 @@ const rotuloPeriodo = () => S.dia
   : nomeMesRef(S.mesRef).replace(/^./, c => c.toUpperCase());
 
 /* ============ chassi ============ */
+function telasDoPapel() {
+  return (ehJornada() && !SESSAO.empresaId) ? TELAS_JORNADA : TELAS;
+}
+
 function montarNavegacao() {
-  const itens = Object.entries(TELAS)
+  const T = telasDoPapel();
+  const itens = Object.entries(T)
     .filter(([k]) => k !== "config")
     .map(([k, t]) => `<button data-ir="${k}"><span class="ic">${ICONS[t.icone]}</span><span class="tip">${t.nome}</span></button>`).join("");
 
   document.getElementById("rail").innerHTML =
     `<div class="mark"><img src="img/bussola.png" alt=""></div>${itens}
      <div class="sep"></div>
-     <button data-ir="config">${ICONS.engrenagem}<span class="tip">Configurações</span></button>`;
+     ${T === TELAS ? `<button data-ir="config">${ICONS.engrenagem}<span class="tip">Configurações</span></button>` : ""}`;
 
-  document.getElementById("tabbar").innerHTML = Object.entries(TELAS)
+  document.getElementById("tabbar").innerHTML = Object.entries(T)
     .filter(([k]) => k !== "config")
     .map(([k, t]) => `<button data-ir="${k}">${ICONS[t.icone]}<span>${t.nome.replace("Visão Geral", "Visão")}</span></button>`).join("");
 
@@ -89,9 +101,14 @@ function render() {
     logo.textContent = D.empresa?.nome ? D.empresa.nome.toUpperCase().slice(0, 22) : "LOGO DA EMPRESA";
   }
 
-  pintar(({ visao, vendas, pend, custos, fixos, config })[S.tela]());
+  const soJornada = ehJornada() && !SESSAO.empresaId;
+  document.getElementById("pil-mes").classList.toggle("oculto", soJornada);
+  document.getElementById("pil-unidade").classList.toggle("oculto", soJornada);
+  if (soJornada && !TELAS_JORNADA[S.tela]) S.tela = "mentorados";
+
+  pintar(({ visao, vendas, pend, custos, fixos, config, mentorados, acessos })[S.tela]());
   ligar();
-  DB.agendarFechamento(S.mesRef);
+  if (!(ehJornada() && !SESSAO.empresaId)) DB.agendarFechamento(S.mesRef);
 }
 
 /* ============ filtro em vigor ============ */
@@ -632,39 +649,275 @@ function config() {
   </div>`;
 }
 
-/* ============ painel da Jornada ============ */
-async function painelJornada() {
-  pintar(carregando());
-  const { collection, getDocs } = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js");
-  const { db } = await import("./firebase-init.js");
-  let empresas = [];
-  try {
-    const snap = await getDocs(collection(db, "empresas"));
-    empresas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (e) {
-    console.error(e);
-  }
-  const autorizadas = empresas.filter(e => e.autorizaJornada);
+/* ============ área da Jornada ============ */
+// A equipe da Jornada não tem empresa própria. Ela cadastra mentorado, cria
+// acesso, e enxerga os números só das empresas que ligaram a autorização.
 
-  pintar(`${cabecalho("Mentorados", `${empresas.length} empresa${empresas.length === 1 ? "" : "s"} no sistema`, "")}
-  <div class="grid anim" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">
-    ${kpi("Empresas", String(empresas.length), "cadastradas")}
-    ${kpi("Com acesso autorizado", String(autorizadas.length), "você enxerga os números destas")}
-    ${kpi("Sem lançar há 15 dias", String(empresas.filter(e => !e.ultimoLancamento || diasDesde(e.ultimoLancamento) > 15).length),
-      "vale um toque")}
-  </div>
-  <div class="card anim" style="padding:18px 8px 6px">
-    <table><thead><tr><th style="padding-left:20px">Empresa</th><th>Último lançamento</th>
-      <th class="r" style="padding-right:20px">Acesso</th></tr></thead><tbody>
-    ${empresas.length ? empresas.map(e => `<tr>
+const J = { empresas: [], acessos: [], carregado: false };
+
+async function carregarJornada() {
+  const [e, a] = await Promise.all([DB.listarEmpresas(), DB.listarAcessos()]);
+  J.empresas = e; J.acessos = a; J.carregado = true;
+}
+
+function mentorados() {
+  if (!J.carregado) return carregando();
+  const autorizadas = J.empresas.filter(e => e.autorizaJornada).length;
+  const paradas = J.empresas.filter(e => !e.ultimoLancamento || diasDesde(e.ultimoLancamento) > 15).length;
+
+  const linhas = J.empresas.length ? J.empresas.map(e => {
+    const pessoas = J.acessos.filter(a => a.empresaId === e.id).length;
+    return `<tr>
       <td style="padding-left:20px"><div class="who"><div class="ci">${esc(iniciais(e.nome))}</div>
-        <div><div class="nm2">${esc(e.nome)}</div><div class="sb">${esc(e.cnpj || "—")}</div></div></div></td>
+        <div><div class="nm2">${esc(e.nome)}</div><div class="sb">${esc(e.cnpj || "sem CNPJ")}</div></div></div></td>
+      <td>${pessoas} ${pessoas === 1 ? "acesso" : "acessos"}</td>
       <td class="mono" style="color:var(--ink-soft)">${e.ultimoLancamento ? fmtData(e.ultimoLancamento) : "nunca"}</td>
       <td class="r" style="padding-right:20px">${e.autorizaJornada
         ? `<span class="tag up">autorizado</span>` : `<span class="tag nt">privado</span>`}</td>
-    </tr>`).join("") : `<tr><td colspan="3" class="vazia">Nenhuma empresa cadastrada ainda</td></tr>`}
+    </tr>`;
+  }).join("") : `<tr><td colspan="4" class="vazia">Nenhuma empresa cadastrada ainda</td></tr>`;
+
+  return `${cabecalho("Mentorados", `${J.empresas.length} empresa${J.empresas.length === 1 ? "" : "s"} no sistema`,
+    `<button class="btn pri" id="btn-nova-empresa">${ICONS.mais}Nova empresa</button>`)}
+  <div class="grid anim" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;animation-delay:.04s">
+    ${kpi("Empresas", String(J.empresas.length), "cadastradas")}
+    ${kpi("Com acesso autorizado", String(autorizadas), "você enxerga os números destas")}
+    ${kpi("Sem lançar há 15 dias", String(paradas), paradas ? "vale um toque" : "todas em dia",
+      { cor: paradas ? "var(--warn)" : undefined })}
+  </div>
+  <div class="card anim" style="padding:18px 8px 6px;animation-delay:.08s">
+    <table><thead><tr><th style="padding-left:20px">Empresa</th><th>Pessoas</th>
+      <th>Último lançamento</th><th class="r" style="padding-right:20px">Acesso</th></tr></thead>
+      <tbody>${linhas}</tbody></table>
+  </div>`;
+}
+
+function acessos() {
+  if (!J.carregado) return carregando();
+  const daJornada = J.acessos.filter(a => a.papel === "jornada");
+  const deMentorado = J.acessos.filter(a => a.papel !== "jornada");
+
+  const linha = a => {
+    const emp = J.empresas.find(e => e.id === a.empresaId);
+    const orfao = a.papel !== "jornada" && !emp;
+    return `<tr data-acesso="${a.uid}">
+      <td style="padding-left:20px"><div class="who"><div class="ci">${esc(iniciais(a.nome || a.email))}</div>
+        <div><div class="nm2">${esc(a.nome || "—")}</div><div class="sb">${esc(a.email || "")}</div></div></div></td>
+      <td>${a.papel === "jornada"
+        ? `<span class="tag wr">equipe Jornada</span>`
+        : `<span class="tag nt">${esc(a.papel)}</span>`}</td>
+      <td style="color:var(--ink-soft)">${a.papel === "jornada" ? "—"
+        : orfao ? `<span class="tag dn">empresa não encontrada</span>` : esc(emp.nome)}</td>
+      <td class="r" style="padding-right:20px">${a.uid === SESSAO.uid
+        ? `<span class="tag up">você</span>` : ""}</td>
+    </tr>`;
+  };
+
+  const bloco = (titulo, lista, vazio) => `<tr><td colspan="4" style="padding:18px 20px 9px;border-bottom:1px solid var(--line)">
+      <span style="font-size:11.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-soft)">${titulo}</span></td></tr>`
+    + (lista.length ? lista.map(linha).join("")
+       : `<tr><td colspan="4" class="vazia" style="padding:26px 12px">${vazio}</td></tr>`);
+
+  return `${cabecalho("Acessos", `${J.acessos.length} pessoa${J.acessos.length === 1 ? "" : "s"} com acesso`,
+    `<button class="btn pri" id="btn-novo-acesso">${ICONS.pessoaMais}Novo acesso</button>`)}
+  <div class="card anim" style="padding:0 8px 6px;animation-delay:.04s">
+    <table><thead><tr><th style="padding-left:20px">Pessoa</th><th>Papel</th>
+      <th>Empresa</th><th class="r" style="padding-right:20px"></th></tr></thead><tbody>
+      ${bloco("Mentorados", deMentorado, "Nenhum mentorado com acesso ainda")}
+      ${bloco("Equipe da Jornada", daJornada, "Ninguém da equipe além de você")}
     </tbody></table>
-  </div>`);
+  </div>
+  <div class="txt" style="font-size:12.5px;margin-top:14px;padding-left:12px;border-left:2px solid var(--line)">
+    A senha inicial de todo acesso novo é <b>${esc(SENHA_INICIAL)}</b>. Na primeira entrada o
+    sistema obriga a troca, e ninguém entra sem trocar.</div>`;
+}
+
+/* ---------- modal: nova empresa ---------- */
+function modalEmpresa() {
+  abrirModal(molduraModal("Nova empresa", "A empresa do mentorado", `
+    <div class="campo" style="margin-bottom:14px"><span>Nome da empresa</span>
+      <input id="e-nome" placeholder="Como ela é conhecida"></div>
+    <div class="campo" style="margin-bottom:14px"><span>CNPJ (opcional)</span>
+      <input id="e-cnpj" placeholder="00.000.000/0001-00"></div>
+    <div class="campo" style="margin-bottom:14px"><span>Mês de abertura no sistema</span>
+      <input type="month" id="e-abertura" value="${esc(S.mesRef)}"></div>
+    <div class="campo"><span>Unidades, separadas por vírgula (opcional)</span>
+      <input id="e-unidades" placeholder="Matriz, Filial"></div>
+    <div class="txt" style="font-size:12.5px;margin-top:16px;padding-left:12px;border-left:2px solid var(--line)">
+      As quatro linhas de custo do ramo já entram cadastradas: kit solar, instalação,
+      vistoria e engenharia.</div>`,
+    `<button class="btn pri" id="e-salvar">Criar empresa</button>
+     <button class="btn" data-fechar>Cancelar</button>`, { largura: 520 }));
+
+  aplicarMascara(document.getElementById("e-cnpj"), mascaraCNPJ);
+  document.getElementById("e-salvar").addEventListener("click", async () => {
+    const nome = document.getElementById("e-nome").value.trim();
+    if (!nome) return toast("Escreva o nome da empresa.", "erro");
+    const btn = document.getElementById("e-salvar");
+    btn.disabled = true; btn.textContent = "Criando…";
+    try {
+      await DB.criarEmpresa({
+        nome, cnpj: document.getElementById("e-cnpj").value.trim(),
+        mesAbertura: document.getElementById("e-abertura").value || null,
+        unidades: document.getElementById("e-unidades").value
+          .split(",").map(u => u.trim()).filter(Boolean)
+      });
+      await carregarJornada();
+      fecharModal(); render();
+      toast("Empresa criada. Agora crie o acesso da pessoa.", "ok");
+    } catch (e) {
+      console.error(e);
+      btn.disabled = false; btn.textContent = "Criar empresa";
+      toast("Não consegui criar a empresa.", "erro");
+    }
+  });
+}
+
+/* ---------- modal: novo acesso ---------- */
+function modalAcesso() {
+  const temEmpresa = J.empresas.length > 0;
+
+  abrirModal(molduraModal("Novo acesso", "", `
+    <div class="field"><div class="fl">Tipo de acesso</div>
+      <div class="seg"><button type="button" class="a-tipo on" data-t="mentorado">Mentorado</button>
+        <button type="button" class="a-tipo" data-t="jornada">Equipe Jornada</button></div></div>
+
+    <div class="field"><div class="fl">Nome</div>
+      <div class="campo"><input id="a-nome" placeholder="Nome de quem vai usar"></div></div>
+    <div class="field"><div class="fl">E-mail</div>
+      <div class="campo"><input type="email" id="a-email" placeholder="email@empresa.com" autocomplete="off"></div></div>
+
+    <div id="a-bloco-mentorado">
+      <div class="field"><div class="fl">Empresa</div>
+        <div class="campo">${temEmpresa
+          ? `<select id="a-empresa">${J.empresas.map(e =>
+              `<option value="${e.id}">${esc(e.nome)}</option>`).join("")}</select>`
+          : `<div class="inp ph">nenhuma empresa cadastrada</div>`}</div></div>
+      <div class="field"><div class="fl">Papel na empresa</div>
+        <div class="campo"><select id="a-papel">
+          <option value="dono">Dono — lança e configura tudo</option>
+          <option value="financeiro">Financeiro — lança tudo, não configura</option>
+          <option value="leitura">Leitura — só enxerga</option>
+        </select></div></div>
+      ${!temEmpresa ? `<div class="txt" style="font-size:12.5px;margin-top:6px;padding-left:12px;border-left:2px solid var(--debit)">
+        Cadastre a empresa antes, em Mentorados.</div>` : ""}
+    </div>
+
+    <div id="a-bloco-jornada" class="oculto">
+      <div class="txt" style="font-size:13px;margin-top:6px;padding-left:12px;border-left:2px solid var(--line)">
+        Acesso da equipe da Jornada: enxerga a lista de mentorados e cria novos acessos.
+        Só vê os números das empresas que ligaram a autorização, e nunca lança nada por elas.</div>
+    </div>
+
+    <div class="blk">Senha inicial</div>
+    <div class="field"><div class="fl">Senha</div>
+      <div class="inp">${esc(SENHA_INICIAL)}</div></div>
+    <div class="txt" style="font-size:12.5px;margin-top:8px;padding-left:12px;border-left:2px solid var(--line)">
+      Combine essa senha com a pessoa. Na primeira entrada o sistema obriga a troca,
+      e ela não usa o sistema antes de trocar.</div>`,
+    `<button class="btn pri" id="a-salvar">Criar acesso</button>
+     <button class="btn" data-fechar>Cancelar</button>`, { largura: 620 }));
+
+  let tipo = "mentorado";
+  document.querySelectorAll(".a-tipo").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".a-tipo").forEach(o => o.classList.remove("on"));
+    b.classList.add("on");
+    tipo = b.dataset.t;
+    document.getElementById("a-bloco-mentorado").classList.toggle("oculto", tipo !== "mentorado");
+    document.getElementById("a-bloco-jornada").classList.toggle("oculto", tipo !== "jornada");
+  }));
+
+  document.getElementById("a-salvar").addEventListener("click", async () => {
+    const nome = document.getElementById("a-nome").value.trim();
+    const email = document.getElementById("a-email").value.trim().toLowerCase();
+    if (!nome) return toast("Escreva o nome da pessoa.", "erro");
+    if (!email || !email.includes("@")) return toast("Escreva um e-mail válido.", "erro");
+    if (tipo === "mentorado" && !temEmpresa)
+      return toast("Cadastre a empresa antes, na tela de Mentorados.", "erro");
+    if (J.acessos.some(a => (a.email || "").toLowerCase() === email))
+      return toast("Já existe acesso com esse e-mail.", "erro");
+
+    const btn = document.getElementById("a-salvar");
+    btn.disabled = true; btn.textContent = "Criando…";
+    try {
+      // 1. a conta no Firebase Auth, numa instância separada pra não derrubar
+      //    a sessão de quem está cadastrando
+      const uid = await criarContaAuth(email, SENHA_INICIAL);
+      // 2. o vínculo, gravado pela sessão principal, que é a que a regra
+      //    reconhece como equipe da Jornada
+      await DB.gravarAcesso(uid, {
+        nome, email,
+        papel: tipo === "jornada" ? "jornada" : document.getElementById("a-papel").value,
+        empresaId: tipo === "jornada" ? null : document.getElementById("a-empresa").value
+      });
+      await carregarJornada();
+      fecharModal(); render();
+      toast(`Acesso criado. Passe o e-mail e a senha ${SENHA_INICIAL} para ${nome}.`, "ok", 9000);
+    } catch (e) {
+      console.error(e);
+      btn.disabled = false; btn.textContent = "Criar acesso";
+      toast(e.message || "Não consegui criar o acesso.", "erro", 7000);
+    }
+  });
+}
+
+/* ---------- modal: acesso existente ---------- */
+function modalEditarAcesso(uid) {
+  const a = J.acessos.find(x => x.uid === uid);
+  if (!a) return;
+  const euMesmo = uid === SESSAO.uid;
+  const emp = J.empresas.find(e => e.id === a.empresaId);
+
+  abrirModal(molduraModal(a.nome || a.email, a.email, `
+    <div class="field"><div class="fl">Papel</div>
+      <div class="campo">${euMesmo
+        ? `<div class="inp">${esc(a.papel)}</div>`
+        : `<select id="ea-papel">
+            ${["dono", "financeiro", "leitura", "jornada"].map(p =>
+              `<option value="${p}" ${a.papel === p ? "selected" : ""}>${p === "jornada" ? "equipe Jornada" : p}</option>`).join("")}
+           </select>`}</div></div>
+    <div class="field"><div class="fl">Empresa</div>
+      <div class="campo"><div class="inp">${esc(emp?.nome || (a.papel === "jornada" ? "—" : "não encontrada"))}</div></div></div>
+    ${euMesmo ? `<div class="txt" style="font-size:12.5px;margin-top:14px;padding-left:12px;border-left:2px solid var(--line)">
+      Você não altera o próprio papel nem remove o próprio acesso. É o que impede a última
+      pessoa da Jornada de se trancar do lado de fora.</div>` : ""}
+    <div class="blk">Senha</div>
+    <button class="btn" id="ea-link">${ICONS.chave}Enviar link de troca de senha</button>`,
+    euMesmo ? `<button class="btn" data-fechar>Fechar</button>`
+      : `<button class="btn pri" id="ea-salvar">Salvar</button>
+         <button class="btn" data-fechar>Cancelar</button>
+         <div style="flex:1"></div>
+         <button class="btn plano" id="ea-remover">${ICONS.lixeira}Remover acesso</button>`,
+    { largura: 540 }));
+
+  document.getElementById("ea-link").addEventListener("click", async () => {
+    try {
+      await enviarLinkDeSenha(a.email);
+      toast(`Link enviado para ${a.email}.`, "ok");
+    } catch { toast("Não consegui enviar o link agora.", "erro"); }
+  });
+
+  document.getElementById("ea-salvar")?.addEventListener("click", async () => {
+    const papel = document.getElementById("ea-papel").value;
+    await DB.atualizarAcesso(uid, {
+      papel, empresaId: papel === "jornada" ? null : (a.empresaId || null)
+    });
+    await carregarJornada();
+    fecharModal(); render();
+    toast("Acesso atualizado.", "ok");
+  });
+
+  document.getElementById("ea-remover")?.addEventListener("click", async () => {
+    const ok = await confirmar(
+      `Remover o acesso de ${a.nome || a.email}? A pessoa deixa de entrar em qualquer empresa. ` +
+      `A conta continua existindo no Firebase e pode ser religada depois.`,
+      { textoConfirmar: "Remover acesso" });
+    if (!ok) return;
+    await DB.excluirAcesso(uid);
+    await carregarJornada();
+    fecharModal(); render();
+    toast("Acesso removido.", "ok");
+  });
 }
 
 /* ============ ligações ============ */
@@ -735,6 +988,9 @@ function ligar() {
   liga("btn-novo-custo", () => modalCusto(null));
   liga("btn-novo-fixo", () => modalFixo(null));
   liga("btn-dre", exportarDRE);
+  liga("btn-nova-empresa", modalEmpresa);
+  liga("btn-novo-acesso", modalAcesso);
+  q("[data-acesso]").forEach(tr => tr.addEventListener("click", () => modalEditarAcesso(tr.dataset.acesso)));
   liga("btn-gerar", async () => {
     const n = await DB.gerarOcorrencias(S.mesRef);
     toast(n ? `${n} lançamento${n > 1 ? "s" : ""} criado${n > 1 ? "s" : ""}.` : "Nada novo para gerar.", "ok");
@@ -1354,7 +1610,13 @@ iniciarAuth({
   aoEntrar: async () => {
     montarNavegacao();
     pintar(carregando());
-    if (ehJornada() && !SESSAO.empresaId) return painelJornada();
+    if (ehJornada() && !SESSAO.empresaId) {
+      S.tela = "mentorados";
+      try { await carregarJornada(); } catch (e) { console.error(e); }
+      S.pronto = true;
+      render();
+      return;
+    }
     try {
       await DB.carregarEmpresa();
       if (!D.empresa) {

@@ -268,6 +268,61 @@ async function tocarEmpresa() {
   catch (e) { /* não é crítico */ }
 }
 
+/* ============ área da Jornada: empresas e acessos ============ */
+// Leitura única: essas listas mudam quando alguém cadastra, não o tempo todo.
+
+export async function listarEmpresas() {
+  const snap = await getDocs(collection(db, "empresas"));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+}
+
+export async function listarAcessos() {
+  const snap = await getDocs(collection(db, "usuarios"));
+  return snap.docs.map(d => ({ uid: d.id, ...d.data() }))
+    .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+}
+
+export async function criarEmpresa(dados) {
+  const ref = doc(collection(db, "empresas"));
+  await setDoc(ref, {
+    nome: dados.nome,
+    cnpj: dados.cnpj || "",
+    logoBase64: null,
+    mesAbertura: dados.mesAbertura || null,
+    unidades: dados.unidades || [],
+    autorizaJornada: false,
+    ultimoLancamento: null,
+    criadoEm: serverTimestamp()
+  });
+  // Semeia o catálogo de linhas de custo do ramo, senão a primeira venda
+  // abre sem nenhuma linha esperando valor.
+  const lote = writeBatch(db);
+  [["kit", "Kit solar"], ["instalacao", "Instalação"],
+   ["vistoria", "Vistoria"], ["engenharia", "Engenharia"]]
+    .forEach(([id, nome], i) =>
+      lote.set(doc(db, "empresas", ref.id, "linhasCusto", id), { nome, padrao: true, ordem: i + 1 }));
+  await lote.commit();
+  return ref.id;
+}
+
+export async function gravarAcesso(uid, dados) {
+  await setDoc(doc(db, "usuarios", uid), { ...dados, criadoEm: serverTimestamp() });
+}
+
+export async function atualizarAcesso(uid, dados) {
+  await emSegundoPlano(updateDoc(doc(db, "usuarios", uid), dados),
+    "Não consegui salvar o acesso.");
+}
+
+export async function excluirAcesso(uid) {
+  // Some o vínculo, não a conta do Firebase Auth: apagar conta exige o Admin
+  // SDK, que pede plano pago. Sem vínculo a pessoa não entra em empresa
+  // nenhuma, que é o efeito prático.
+  await emSegundoPlano(deleteDoc(doc(db, "usuarios", uid)),
+    "Não consegui remover o acesso.");
+}
+
 /* ============ ocorrências do mês a partir da base ============ */
 // A tabela de Custos Fixos e Folha é só a BASE. Ela gera a ocorrência do mês,
 // que cai na tela de Custos e pode ser editada ou adiada sem mexer na base.
