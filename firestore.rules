@@ -32,6 +32,22 @@ service cloud.firestore {
     // Equipe da Jornada: papel gravado no próprio /usuarios e empresaId nulo
     function souJornada() { return logado() && meu().papel == 'jornada'; }
 
+    // Janela do primeiro acesso: aberta enquanto config/bootstrap não existir
+    // ou não estiver marcado como criado. É o que permite o primeiro
+    // administrador da Jornada nascer sem ninguém antes dele.
+    function bootstrapAberto() {
+      return !exists(/databases/$(database)/documents/config/bootstrap)
+        || get(/databases/$(database)/documents/config/bootstrap).data.criado != true;
+    }
+
+    // O e-mail do primeiro administrador está amarrado aqui na regra. Sem
+    // isso existe corrida entre publicar as regras e criar a primeira conta,
+    // e a apiKey é pública.
+    function ehPrimeiroAdmin(uid) {
+      return request.auth.uid == uid
+        && request.auth.token.email == 'felipecastiged@gmail.com';
+    }
+
     function empresaAutoriza(empresaId) {
       return get(/databases/$(database)/documents/empresas/$(empresaId)).data.autorizaJornada == true;
     }
@@ -51,9 +67,17 @@ service cloud.firestore {
     // qual empresa abrir, e não escreve nele em hipótese nenhuma.
     match /usuarios/{uid} {
       allow read: if logado() && (request.auth.uid == uid || souJornada());
-      allow create: if souJornada()
-        && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
-        && request.resource.data.papel in ['dono','financeiro','leitura','jornada'];
+      // Primeiro administrador: só o e-mail amarrado, só como 'jornada', só
+      // enquanto a janela estiver aberta. A cláusula do bootstrap vem antes
+      // porque souJornada() dá erro quando o vínculo ainda não existe.
+      allow create: if (bootstrapAberto()
+          && ehPrimeiroAdmin(uid)
+          && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
+          && request.resource.data.papel == 'jornada'
+          && request.resource.data.empresaId == null)
+        || (souJornada()
+          && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
+          && request.resource.data.papel in ['dono','financeiro','leitura','jornada']);
       // Ninguém altera o próprio vínculo: sem isso, quem é da Jornada se
       // rebaixa por engano e ninguém mais consegue criar acesso.
       allow update: if souJornada() && request.auth.uid != uid
@@ -69,7 +93,7 @@ service cloud.firestore {
     // criar a primeira conta, e a apiKey é pública.
     match /config/bootstrap {
       allow read: if logado();
-      allow update: if logado()
+      allow create, update: if logado()
         && request.auth.token.email == 'felipecastiged@gmail.com'
         && request.resource.data.keys().hasOnly(['criado','emailAdmin'])
         && request.resource.data.criado == true;
