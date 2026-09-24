@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0A0A0A">
+<title>Financeiro — Jornada do M1lhão</title>
+<link rel="icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json?v=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+<!-- fundo: carta náutica animada -->
+<div id="fundo" aria-hidden="true">
+  <div class="malha"></div>
+  <div class="brilho"></div>
+  <div class="brilho b2"></div>
+  <svg class="carta" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+    <path class="costa"    d="M-40 690 C 180 640, 300 720, 470 690 S 760 600, 940 646 S 1270 736, 1660 668"/>
+    <path class="costa c2" d="M-40 738 C 200 690, 320 768, 500 738 S 790 650, 970 694 S 1290 782, 1660 716"/>
+    <path class="costa c3" d="M-40 786 C 220 740, 340 816, 530 786 S 820 700, 1000 742 S 1310 828, 1660 764"/>
+    <path class="costa c2" d="M120 172 C 260 118, 410 176, 520 138 S 700 76, 828 118"/>
+    <path class="rota"        d="M118 782 C 300 700, 262 540, 440 470 S 720 470, 806 356 S 1000 176, 1216 232"/>
+    <path class="rota rota-2" d="M118 782 C 340 806, 560 700, 700 606 S 1010 560, 1216 232"/>
+    <circle class="marco" cx="118" cy="782" r="7"/>
+    <circle class="anel"  cx="118" cy="782" r="14"/>
+    <circle class="marco" cx="440" cy="470" r="5" style="animation-delay:-1.4s"/>
+    <circle class="marco" cx="806" cy="356" r="5" style="animation-delay:-2.6s"/>
+    <g class="xis"><path d="M1190 206 L1242 258"/><path d="M1242 206 L1190 258"/></g>
+    <circle class="anel" cx="1216" cy="232" r="26" style="animation-delay:-2.2s"/>
+    <circle class="anel" cx="1216" cy="232" r="26" style="animation-delay:-4s"/>
+  </svg>
+  <div class="bussola"><img src="img/bussola.png" alt=""></div>
+</div>
+
+<!-- entrada: login e troca de senha -->
+<div id="entrada"></div>
+
+<!-- sistema -->
+<div id="app" class="shell oculto">
+  <nav class="rail" id="rail"></nav>
+
+  <div class="main">
+    <header class="top">
+      <div class="brand">
+        <img class="wm" src="img/wordmark.png" alt="Jornada do M1lhão">
+        <div class="div"></div>
+        <div id="logo-empresa" class="ph">LOGO DA EMPRESA</div>
+      </div>
+      <div class="sp"></div>
+      <span id="sinc" class="sinc" title="Salvando…"></span>
+      <button class="pill on" id="pil-mes"></button>
+      <button class="pill" id="pil-unidade"></button>
+      <button class="av" id="btn-conta"></button>
+    </header>
+
+    <main class="body" id="cnt"></main>
+  </div>
+
+  <nav class="tabbar" id="tabbar"></nav>
+</div>
+
+<div id="modal"></div>
+<div class="lcdica" id="dica"></div>
+
+<script type="module" src="app.js?v=1"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    addEventListener("load", () => navigator.serviceWorker.register("service-worker.js?v=1").catch(()=>{}));
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+rules_version = '2';
+
+// Sistema Financeiro dos Mentorados — Jornada do M1lhão
+//
+// A regra central: cada mentorado só alcança a PRÓPRIA empresa. O vínculo
+// entre pessoa e empresa mora em /usuarios/{uid} e SÓ a Jornada escreve lá.
+// Se o próprio usuário pudesse editar esse documento, ele trocaria de empresa
+// e leria o financeiro de outro mentorado.
+//
+// A equipe da Jornada só enxerga a empresa que tiver `autorizaJornada: true`,
+// e essa chave é do mentorado. Isso vale aqui na regra, não só na tela: sem
+// isso, bastaria abrir o console pra ler o que a tela esconde.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function logado() { return request.auth != null; }
+
+    function meu() { return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data; }
+
+    function souDaEmpresa(empresaId) {
+      return logado() && meu().empresaId == empresaId;
+    }
+
+    // Papéis dentro da empresa do mentorado
+    function papel() { return meu().papel; }
+    function podeEscrever(empresaId) {
+      return souDaEmpresa(empresaId) && papel() in ['dono', 'financeiro'];
+    }
+
+    // Equipe da Jornada: papel gravado no próprio /usuarios e empresaId nulo
+    function souJornada() { return logado() && meu().papel == 'jornada'; }
+
+    function empresaAutoriza(empresaId) {
+      return get(/databases/$(database)/documents/empresas/$(empresaId)).data.autorizaJornada == true;
+    }
+
+    // Leitura: quem é da empresa sempre; a Jornada só com a chave ligada.
+    function podeLer(empresaId) {
+      return souDaEmpresa(empresaId) || (souJornada() && empresaAutoriza(empresaId));
+    }
+
+    function texto(v, max) { return v is string && v.size() > 0 && v.size() <= max; }
+    function numeroOk(v) { return v is number && v >= -99999999 && v <= 99999999; }
+    function mesRefOk(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}$'); }
+    function dataOk(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+
+    // ---------- vínculo pessoa ↔ empresa ----------
+    // Escrita SÓ pela Jornada. O mentorado lê o próprio documento pra saber
+    // qual empresa abrir, e não escreve nele em hipótese nenhuma.
+    match /usuarios/{uid} {
+      allow read: if logado() && (request.auth.uid == uid || souJornada());
+      allow create, update: if souJornada()
+        && request.resource.data.keys().hasOnly(['empresaId','papel','nome','email','criadoEm'])
+        && request.resource.data.papel in ['dono','financeiro','leitura','jornada'];
+      allow delete: if souJornada() && request.auth.uid != uid;   // ninguém se apaga
+    }
+
+    // ---------- janela de criação do primeiro acesso da Jornada ----------
+    // Enquanto config/bootstrap.criado for false, o e-mail listado aqui pode
+    // criar o próprio vínculo como 'jornada'. A janela é amarrada ao e-mail
+    // na própria regra: sem isso existe corrida entre publicar as regras e
+    // criar a primeira conta, e a apiKey é pública.
+    match /config/bootstrap {
+      allow read: if logado();
+      allow update: if logado()
+        && request.auth.token.email == 'felipecastiged@gmail.com'
+        && request.resource.data.keys().hasOnly(['criado','emailAdmin'])
+        && request.resource.data.criado == true;
+    }
+
+    // ---------- a empresa do mentorado ----------
+    match /empresas/{empresaId} {
+      allow read: if podeLer(empresaId);
+
+      // A Jornada cria a empresa. O mentorado edita os dados dela e a chave
+      // de autorização, mas nunca cria nem apaga.
+      allow create: if souJornada()
+        && request.resource.data.keys().hasOnly(
+             ['nome','cnpj','logoBase64','mesAbertura','unidades','autorizaJornada','criadoEm','ultimoLancamento'])
+        && texto(request.resource.data.nome, 120);
+
+      allow update: if podeEscrever(empresaId)
+        && request.resource.data.keys().hasOnly(
+             ['nome','cnpj','logoBase64','mesAbertura','unidades','autorizaJornada','criadoEm','ultimoLancamento'])
+        && texto(request.resource.data.nome, 120)
+        && request.resource.data.autorizaJornada is bool
+        // a logo é base64 no documento: teto explícito pra não estourar 1 MB
+        && (!('logoBase64' in request.resource.data.keys())
+            || request.resource.data.logoBase64 == null
+            || request.resource.data.logoBase64.size() < 200000);
+
+      allow delete: if false;   // empresa não se apaga pela interface
+
+      // ---------- catálogo de linhas de custo ----------
+      match /linhasCusto/{id} {
+        allow read: if podeLer(empresaId);
+        allow write: if podeEscrever(empresaId)
+          && (request.method == 'delete' || (
+               request.resource.data.keys().hasOnly(['nome','padrao','ordem'])
+            && texto(request.resource.data.nome, 60)));
+      }
+
+      // ---------- vendas ----------
+      // custoTotal e lucroBruto NÃO existem aqui de propósito: são a soma dos
+      // custos vinculados. Dois números pra mesma coisa divergem em silêncio
+      // quando um custo chega atrasado.
+      match /vendas/{id} {
+        allow read: if podeLer(empresaId);
+        allow create, update: if podeEscrever(empresaId)
+          && request.resource.data.keys().hasOnly(
+               ['cliente','vendedor','unidade','data','mesRef','kwp','valorVenda',
+                'descontoTipo','descontoValor','comissoes','custosEsperados','pendencias','criadoEm'])
+          && texto(request.resource.data.cliente, 120)
+          && dataOk(request.resource.data.data)
+          && mesRefOk(request.resource.data.mesRef)
+          && numeroOk(request.resource.data.valorVenda)
+          && request.resource.data.valorVenda >= 0
+          && request.resource.data.pendencias is int;
+        allow delete: if podeEscrever(empresaId);
+      }
+
+      // ---------- custos ----------
+      // vendaId preenchido = entra antes do lucro bruto.
+      // vendaId nulo       = entra depois.
+      match /custos/{id} {
+        allow read: if podeLer(empresaId);
+        allow create, update: if podeEscrever(empresaId)
+          && request.resource.data.keys().hasOnly(
+               ['descricao','linhaCustoId','dataPagamento','mesRef','valor','unidade',
+                'origem','vendaId','clienteId','fixoId','criadoEm'])
+          && texto(request.resource.data.descricao, 160)
+          && dataOk(request.resource.data.dataPagamento)
+          && mesRefOk(request.resource.data.mesRef)
+          && numeroOk(request.resource.data.valor)
+          && request.resource.data.origem in ['venda','avulso','fixo','folha','comissao','imposto'];
+        allow delete: if podeEscrever(empresaId);
+      }
+
+      // ---------- base dos custos fixos e da folha ----------
+      match /custosFixos/{id} {
+        allow read: if podeLer(empresaId);
+        allow write: if podeEscrever(empresaId)
+          && (request.method == 'delete' || (
+               request.resource.data.keys().hasOnly(
+                 ['nome','valor','diaVencimento','ativo','tipo','unidade','funcao','grupo',
+                  'ajudaCusto','proLabore','extras','criadoEm'])
+            && texto(request.resource.data.nome, 120)
+            && numeroOk(request.resource.data.valor)
+            && request.resource.data.tipo in ['fixo','folha']));
+      }
+
+      // ---------- fechamento mensal ----------
+      // Totais congelados do mês: é o que faz o gráfico de doze meses custar
+      // doze leituras em vez de um ano inteiro de vendas e custos.
+      match /fechamentos/{mesRef} {
+        allow read: if podeLer(empresaId);
+        allow write: if podeEscrever(empresaId)
+          && (request.method == 'delete' || (
+               request.resource.data.keys().hasOnly(
+                 ['venda','base','comissoes','lucroBruto','naoPrevisto','fixos','imposto',
+                  'lucroLiquido','nVendas','atualizadoEm'])
+            && numeroOk(request.resource.data.venda)));
+      }
+    }
+
+    // Nada mais é acessível.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
