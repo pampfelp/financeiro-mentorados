@@ -43,6 +43,14 @@ export function fecharTudo() {
   Object.keys(escutas).forEach(fecharEscuta);
 }
 
+/* Mês mais recente que tem fechamento gravado. Leitura única, no máximo doze
+   documentos: usada pela Jornada pra abrir a empresa num mês que tenha dado. */
+export async function ultimoMesComDado() {
+  const snap = await getDocs(collection(db, base(), "fechamentos"));
+  const meses = snap.docs.map(d => d.id).sort();
+  return meses.length ? meses[meses.length - 1] : null;
+}
+
 /* ============ carga inicial ============ */
 export async function carregarEmpresa() {
   const snap = await getDoc(doc(db, "empresas", SESSAO.empresaId));

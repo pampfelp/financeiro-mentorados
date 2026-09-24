@@ -62,7 +62,7 @@ function montarNavegacao() {
   document.getElementById("rail").innerHTML =
     `<div class="mark"><img src="img/bussola.png" alt=""></div>${itens}
      <div class="sep"></div>
-     ${T === TELAS ? `<button data-ir="config">${ICONS.engrenagem}<span class="tip">Configurações</span></button>` : ""}`;
+     ${T === TELAS && !ehJornada() ? `<button data-ir="config">${ICONS.engrenagem}<span class="tip">Configurações</span></button>` : ""}`;
 
   document.getElementById("tabbar").innerHTML = Object.entries(T)
     .filter(([k]) => k !== "config")
@@ -106,9 +106,11 @@ function render() {
   document.getElementById("pil-unidade").classList.toggle("oculto", soJornada);
   if (soJornada && !TELAS_JORNADA[S.tela]) S.tela = "mentorados";
 
-  pintar(({ visao, vendas, pend, custos, fixos, config, mentorados, acessos })[S.tela]());
+  if (ehJornada() && SESSAO.empresaId && S.tela === "config") S.tela = "visao";
+  pintar(faixaVisualizacao() + ({ visao, vendas, pend, custos, fixos, config, mentorados, acessos })[S.tela]());
   ligar();
-  if (!(ehJornada() && !SESSAO.empresaId)) DB.agendarFechamento(S.mesRef);
+  // A Jornada só lê: gravar o fechamento seria escrever em nome da empresa.
+  if (!ehJornada()) DB.agendarFechamento(S.mesRef);
 }
 
 /* ============ filtro em vigor ============ */
@@ -660,6 +662,48 @@ async function carregarJornada() {
   J.empresas = e; J.acessos = a; J.carregado = true;
 }
 
+/* ---------- a Jornada olhando os números de uma empresa (somente leitura) ---------- */
+function faixaVisualizacao() {
+  if (!(ehJornada() && SESSAO.empresaId)) return "";
+  return `<div class="card anim" style="margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-color:rgba(254,209,22,.3)">
+    <span class="tag wr">somente leitura</span>
+    <div style="flex:1;min-width:200px;font-size:13.5px">Você está vendo os números de <b>${esc(D.empresa?.nome || "")}</b>,
+      liberados por ela. Nada aqui pode ser alterado.</div>
+    <button class="btn" id="btn-voltar-mentorados">Voltar aos mentorados</button>
+  </div>`;
+}
+
+async function abrirEmpresa(id) {
+  SESSAO.empresaId = id;
+  S.tela = "visao"; S.dia = null; S.unidade = "todas";
+  S.mesRef = mesRefDe(hojeISO());
+  montarNavegacao();
+  pintar(carregando());
+  try {
+    await DB.carregarEmpresa();
+    await DB.carregarBase();
+    // abre no mês mais recente que tem dado, senão a tela abre vazia
+    S.mesRef = (await DB.ultimoMesComDado()) || S.mesRef;
+    DB.escutarFechamentos();
+    DB.escutarMes(S.mesRef);
+    DB.quandoMudar(() => { if (S.pronto) render(); });
+    render();
+  } catch (e) {
+    console.error(e);
+    toast("Não consegui abrir esta empresa. Ela pode ter desligado o acesso.", "erro", 7000);
+    voltarAosMentorados();
+  }
+}
+
+function voltarAosMentorados() {
+  DB.fecharTudo();
+  SESSAO.empresaId = null;
+  D.empresa = null; D.vendas = []; D.custos = []; D.fixos = []; D.linhasCusto = []; D.fechamentos = {};
+  S.tela = "mentorados"; S.dia = null;
+  montarNavegacao();
+  render();
+}
+
 function mentorados() {
   if (!J.carregado) return carregando();
   const autorizadas = J.empresas.filter(e => e.autorizaJornada).length;
@@ -667,13 +711,13 @@ function mentorados() {
 
   const linhas = J.empresas.length ? J.empresas.map(e => {
     const pessoas = J.acessos.filter(a => a.empresaId === e.id).length;
-    return `<tr>
+    return `<tr ${e.autorizaJornada ? `data-ver="${e.id}"` : ""}>
       <td style="padding-left:20px"><div class="who"><div class="ci">${esc(iniciais(e.nome))}</div>
         <div><div class="nm2">${esc(e.nome)}</div><div class="sb">${esc(e.cnpj || "sem CNPJ")}</div></div></div></td>
       <td>${pessoas} ${pessoas === 1 ? "acesso" : "acessos"}</td>
       <td class="mono" style="color:var(--ink-soft)">${e.ultimoLancamento ? fmtData(e.ultimoLancamento) : "nunca"}</td>
       <td class="r" style="padding-right:20px">${e.autorizaJornada
-        ? `<span class="tag up">autorizado</span>` : `<span class="tag nt">privado</span>`}</td>
+        ? `<span class="tag up">ver números</span>` : `<span class="tag nt">privado</span>`}</td>
     </tr>`;
   }).join("") : `<tr><td colspan="4" class="vazia">Nenhuma empresa cadastrada ainda</td></tr>`;
 
@@ -989,6 +1033,8 @@ function ligar() {
   liga("btn-novo-fixo", () => modalFixo(null));
   liga("btn-dre", exportarDRE);
   liga("btn-nova-empresa", modalEmpresa);
+  liga("btn-voltar-mentorados", voltarAosMentorados);
+  q("[data-ver]").forEach(tr => tr.addEventListener("click", () => abrirEmpresa(tr.dataset.ver)));
   liga("btn-novo-acesso", modalAcesso);
   q("[data-acesso]").forEach(tr => tr.addEventListener("click", () => modalEditarAcesso(tr.dataset.acesso)));
   liga("btn-gerar", async () => {
