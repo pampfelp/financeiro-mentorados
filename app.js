@@ -12,8 +12,12 @@ import {
   esc, moeda, moedaCurta, pct, numero, ICONS, toast, abrirModal, fecharModal,
   molduraModal, confirmar, hojeISO, fmtData, fmtDataCurta, mesRefDe, nomeMesRef,
   diasNoMes, iniciais, arredondar2, lerValor, imagemParaBase64, mascaraCNPJ,
-  aplicarMascara, MES_CURTO, MES_NOME
+  aplicarMascara, MES_CURTO, MES_NOME, iniciarBannerInstalacao, podeInstalar, instalarAgora
 } from "./shared.js";
+
+// Banner de instalação (Android e iPhone). O evento do navegador pode chegar
+// cedo, então isto roda antes de qualquer outra coisa.
+iniciarBannerInstalacao();
 
 /* ============ estado da interface ============ */
 const S = {
@@ -1128,9 +1132,11 @@ function abrirMenuConta() {
   const m = document.createElement("div");
   m.className = "menu-conta";
   m.innerHTML = `<div class="quem"><b>${esc(SESSAO.nome)}</b><span>${esc(SESSAO.email)} · ${esc(SESSAO.papel)}</span></div>
+    ${podeInstalar() ? `<button id="mc-instalar">${ICONS.celular}Instalar aplicativo</button>` : ""}
     <button id="mc-sair">${ICONS.sair}Sair</button>`;
   document.body.appendChild(m);
   document.getElementById("mc-sair").addEventListener("click", sair);
+  document.getElementById("mc-instalar")?.addEventListener("click", () => { m.remove(); instalarAgora(); });
   setTimeout(() => document.addEventListener("click", function fecha(e) {
     if (!m.contains(e.target)) { m.remove(); document.removeEventListener("click", fecha); }
   }), 0);

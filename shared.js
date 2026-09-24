@@ -104,6 +104,8 @@ export const ICONS = {
   sair: svg(`<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>`),
   aviso: svg(`<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>`),
   check: svg(`<path d="M20 6L9 17l-5-5"/>`),
+  compartilhar: svg(`<path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/>`),
+  celular: svg(`<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>`),
   pessoas: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>`),
   pessoaMais: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>`),
   chave: svg(`<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3l1.5 1.5-2 2 1.5 1.5-2 2-1.5-1.5-2.8 2.8"/>`)
@@ -272,4 +274,95 @@ export function lerValor(str) {
   const s = String(str || "").replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
+}
+
+/* ============ instalar como aplicativo (PWA) ============ */
+// Android, Chrome e Edge disparam `beforeinstallprompt`: guardamos o evento e
+// mostramos o nosso botão. O iPhone NÃO tem esse evento, então o único jeito
+// é ensinar o caminho pelo menu Compartilhar do Safari.
+//
+// O evento é capturado assim que este arquivo carrega. Se esperasse a tela
+// abrir, ele já teria passado.
+let promptInstalacao = null;
+const CHAVE_DISPENSA = "fmj_pwa_dispensado_ate";
+
+export const ehIOS = () =>
+  /iphone|ipad|ipod/i.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);   // iPad novo se anuncia como Mac
+
+export const jaInstalado = () =>
+  window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+
+export const podeInstalar = () => !jaInstalado() && (!!promptInstalacao || ehIOS());
+
+function lerDispensa() { try { return Number(localStorage.getItem(CHAVE_DISPENSA) || 0); } catch { return 0; } }
+function gravarDispensa(dias) { try { localStorage.setItem(CHAVE_DISPENSA, String(Date.now() + dias * 86400000)); } catch {} }
+
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  promptInstalacao = e;
+});
+window.addEventListener("appinstalled", () => {
+  promptInstalacao = null;
+  document.querySelector(".pwa-banner")?.remove();
+  toast("Aplicativo instalado.", "ok");
+});
+
+/* Botão "Instalar": no Android abre o pedido nativo; no iPhone abre o passo a passo. */
+export async function instalarAgora() {
+  if (promptInstalacao) {
+    const ev = promptInstalacao;
+    promptInstalacao = null;
+    // O banner sai na hora: userChoice só resolve depois que a pessoa decide
+    // no diálogo do navegador, e o banner não pode ficar parado esperando.
+    document.querySelector(".pwa-banner")?.remove();
+    ev.prompt();
+    try { await ev.userChoice; } catch {}
+    return;
+  }
+  if (ehIOS()) mostrarPassoAPassoIOS();
+}
+
+function mostrarPassoAPassoIOS() {
+  document.querySelector(".pwa-banner")?.remove();
+  abrirModal(molduraModal("Instalar no iPhone", "Leva menos de um minuto", `
+    <ol class="passos-ios">
+      <li><span class="n">1</span><div>Abra este endereço no <b>Safari</b>. Em outros navegadores o iPhone pode não oferecer a instalação.</div></li>
+      <li><span class="n">2</span><div>Toque no botão <b>Compartilhar</b> <span class="ic-inline">${ICONS.compartilhar}</span>, na barra de baixo do Safari.</div></li>
+      <li><span class="n">3</span><div>Role a lista e toque em <b>Adicionar à Tela de Início</b>.</div></li>
+      <li><span class="n">4</span><div>Toque em <b>Adicionar</b>, no canto de cima. O ícone aparece na sua tela inicial.</div></li>
+    </ol>`, `<button class="btn pri" data-fechar>Entendi</button>`, { largura: 460 }));
+}
+
+function mostrarBannerInstalacao() {
+  if (document.querySelector(".pwa-banner") || !podeInstalar() || Date.now() < lerDispensa()) return;
+  const ios = !promptInstalacao && ehIOS();
+  const b = document.createElement("div");
+  b.className = "pwa-banner";
+  b.setAttribute("role", "dialog");
+  b.setAttribute("aria-label", "Instalar aplicativo");
+  b.innerHTML = `
+    <img src="icon-192.png" alt="" class="pwa-ic">
+    <div class="pwa-tx">
+      <b>Instale o Financeiro no seu ${ios ? "iPhone" : "celular"}</b>
+      <span>${ios
+        ? `Toque em Compartilhar <i class="ic-inline">${ICONS.compartilhar}</i> e depois em <em>Adicionar à Tela de Início</em>.`
+        : "Abre em tela cheia, direto da tela inicial, sem digitar o endereço."}</span>
+    </div>
+    <button class="btn pri mini" id="pwa-instalar">${ios ? "Como instalar" : "Instalar"}</button>
+    <button class="pwa-x" id="pwa-fechar" aria-label="Agora não">${ICONS.x}</button>`;
+  document.body.appendChild(b);
+  document.getElementById("pwa-instalar").addEventListener("click", instalarAgora);
+  document.getElementById("pwa-fechar").addEventListener("click", () => {
+    gravarDispensa(14);           // não insiste por duas semanas
+    b.remove();
+  });
+}
+
+/* Chamar uma vez, na partida do app. */
+export function iniciarBannerInstalacao({ atrasoMs = 2500 } = {}) {
+  if (jaInstalado()) return;
+  setTimeout(mostrarBannerInstalacao, atrasoMs);
+  // O evento do Android pode chegar depois do atraso: mostra assim que chegar.
+  window.addEventListener("beforeinstallprompt", () => setTimeout(mostrarBannerInstalacao, 400));
 }

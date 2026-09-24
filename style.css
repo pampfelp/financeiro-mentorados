@@ -455,3 +455,33 @@ input[type=checkbox]{width:auto;height:auto}
 .sem-anim .chart .b{animation:none!important;transform:scaleY(1)}
 .sem-anim .rosca circle.f{animation:none!important;stroke-dashoffset:var(--do)}
 .sem-anim .bar i{animation:none!important;width:var(--w)}
+
+/* ---------- banner de instalação do aplicativo ---------- */
+.pwa-banner{position:fixed;z-index:45;right:24px;bottom:24px;width:min(420px,calc(100vw - 32px));
+  display:flex;align-items:center;gap:13px;padding:13px 14px;
+  background:rgba(28,28,28,.96);backdrop-filter:blur(14px);border:1px solid rgba(254,209,22,.28);
+  border-radius:16px;box-shadow:0 16px 44px rgba(0,0,0,.6);animation:subirToast .35s var(--ease)}
+.pwa-ic{width:44px;height:44px;border-radius:11px;flex:none}
+.pwa-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink-soft);line-height:1.4}
+.pwa-tx b{font-size:13px;color:var(--ink);font-weight:600}
+.pwa-tx em{font-style:normal;color:var(--ink)}
+.pwa-x{width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--ink-faint);
+  display:grid;place-items:center;cursor:pointer;flex:none;transition:.2s}
+.pwa-x:hover{color:var(--ink);background:var(--panel-3)}
+.pwa-x svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
+.ic-inline{display:inline-block;width:15px;height:15px;vertical-align:-3px;color:var(--dourado)}
+.ic-inline svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
+.passos-ios{list-style:none;display:flex;flex-direction:column;gap:14px}
+.passos-ios li{display:flex;gap:13px;align-items:flex-start;font-size:13.5px;color:var(--ink-soft);line-height:1.55}
+.passos-ios .n{width:26px;height:26px;border-radius:50%;background:var(--dourado-soft);color:var(--dourado);
+  display:grid;place-items:center;font-weight:700;font-size:13px;flex:none}
+.passos-ios b{color:var(--ink)}
+@media(max-width:900px){
+  /* acima da barra inferior, respeitando a área do indicador do iPhone */
+  .pwa-banner{left:12px;right:12px;width:auto;bottom:calc(92px + env(safe-area-inset-bottom))}
+}
+/* iPhone com entalhe: barra inferior e topo respeitam a área segura */
+@supports(padding:max(0px)){
+  .tabbar{bottom:max(14px,env(safe-area-inset-bottom))}
+  .top{padding-top:max(14px,env(safe-area-inset-top))}
+}
