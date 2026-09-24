@@ -1,9 +1,13 @@
 // Importa o histórico de uma planilha de custos para dentro do sistema.
 // Roda uma vez, no computador, fora do navegador.
 //
-//   npm install xlsx firebase
+//   npm install xlsx firebase-admin
 //   node importar-planilha.mjs --empresa <ID_DA_EMPRESA> --conferir
-//   node importar-planilha.mjs --empresa <ID_DA_EMPRESA> --gravar
+//   node importar-planilha.mjs --empresa <ID_DA_EMPRESA> --chave <caminho.json> --gravar
+//
+// A chave é a conta de serviço do Firebase, baixada do console. O script só
+// recebe o CAMINHO dela. Ela nunca é copiada para o repositório, e ninguém
+// deve commitar esse arquivo.
 //
 // Sem `--gravar` ele só mostra o que faria. Confira antes.
 //
@@ -32,16 +36,6 @@ import XLSX from "xlsx";
 /* ============ configuração ============ */
 // Pasta onde está a planilha .xlsx a importar. Ela fica FORA do repositório.
 const PASTA = process.env.PLANILHAS || String.raw`.\planilhas`;
-
-// Cole a mesma config do firebase-init.js
-const firebaseConfig = {
-  apiKey: "COLE_AQUI",
-  authDomain: "COLE_AQUI.firebaseapp.com",
-  projectId: "COLE_AQUI",
-  storageBucket: "COLE_AQUI.firebasestorage.app",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI"
-};
 
 const ABAS = {
   "FEV MARAMBAIA": ["2026-02", "Marambaia"],
@@ -104,8 +98,9 @@ function lerAba(nomeAba) {
   const iCli   = colQualquer(["Cliente"]);
   const iVend  = colQualquer(["Vendedor"]);
   const iKwp   = colQualquer(["kWp"]);
-  const iCom   = ["Comissão Vendedor", "Comissão SDR", "Comissão Prospectador", "Comissão"]
-    .map(n => col(n)).filter(i => i >= 0);
+  const iCom   = [["Comissão Vendedor", "vendedor"], ["Comissão SDR", "SDR"],
+                  ["Comissão Prospectador", "prospectador"], ["Comissão", "vendedor"]]
+    .map(([n, papel]) => [col(n), papel]).filter(([i]) => i >= 0);
 
   // A aba tem dois blocos empilhados, separados pela LINHA DE TOTAIS.
   // Isso importa: o valor "Custos Fixos" do bloco de baixo cai exatamente na
@@ -155,7 +150,7 @@ function lerAba(nomeAba) {
       kwp: iKwp >= 0 ? num(l[iKwp]) : null,
       valorVenda: total,
       custos,
-      comissoes: iCom.map(i => num(l[i])).filter(v => v > 0)
+      comissoes: iCom.map(([i, papel]) => ({ papel, valor: num(l[i]) })).filter(c => c.valor > 0)
     });
   }
 
@@ -206,7 +201,7 @@ for (const [mesRef, m] of Object.entries(porMes)) {
 
   m.vendas.forEach((v, i) => {
     const vid = `imp-${mesRef}-${i}`;
-    const comTotal = v.comissoes.reduce((s, c) => s + c, 0);
+    const comTotal = v.comissoes.reduce((s, c) => s + c.valor, 0);
     somaVenda += v.valorVenda;
     somaCom += comTotal;
     docs.vendas.push({
@@ -215,9 +210,8 @@ for (const [mesRef, m] of Object.entries(porMes)) {
       vendedor: v.vendedor, unidade: v.unidade, data, mesRef,
       kwp: v.kwp || null, valorVenda: v.valorVenda,
       descontoTipo: "pct", descontoValor: 0,
-      comissoes: comTotal > 0
-        ? [{ papel: "vendedor", tipo: "valor", valor: comTotal, pct: v.valorVenda ? comTotal / v.valorVenda * 100 : 0 }]
-        : [],
+      comissoes: v.comissoes.map(c => ({ papel: c.papel, tipo: "valor", valor: c.valor,
+        pct: v.valorVenda ? c.valor / v.valorVenda * 100 : 0 })),
       custosEsperados: Object.keys(v.custos),
       pendencias: 0
     });
@@ -257,6 +251,45 @@ for (const [mesRef, m] of Object.entries(porMes)) {
   });
 }
 
+/* ============ base de custos fixos e folha ============ */
+// A tabela de Fixos e Folha é só a BASE do que se repete. As linhas de custo
+// fixo do último mês importado viram a base, e as ocorrências desse mês
+// apontam para ela: sem esse vínculo, o botão "Gerar lançamentos do mês"
+// apareceria em julho e duplicaria tudo.
+const ULTIMO = Object.keys(porMes).sort().pop();
+const slug = t => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+docs.fixosBase = [];
+docs.custos.filter(c => c.mesRef === ULTIMO && (c.origem === "fixo" || c.origem === "imposto")).forEach(c => {
+  const id = "fx-" + slug(c.descricao);
+  c.fixoId = id;
+  docs.fixosBase.push({ id, nome: c.descricao, valor: c.valor, diaVencimento: 5, ativo: true,
+    tipo: "fixo", unidade: c.unidade });
+});
+
+// Folha: lida da planilha de folha, aba do último mês. PIX, banco e CPF NÃO
+// são importados: o sistema não precisa deles e são dado pessoal.
+const arqFolha = fs.readdirSync(PASTA).find(f => /FOLHA/i.test(f) && f.endsWith(".xlsx"));
+if (arqFolha) {
+  const wf = XLSX.readFile(path.join(PASTA, arqFolha));
+  const abaFolha = wf.SheetNames.filter(n => /^REF-/i.test(n)).pop();
+  const L = XLSX.utils.sheet_to_json(wf.Sheets[abaFolha], { header: 1, raw: true, defval: null });
+  let grupo = "Administrativo e diretoria";
+  L.forEach((l, r) => {
+    const a = l[0], nome = l[1] && String(l[1]).trim(), funcao = l[2] && String(l[2]).trim();
+    if (typeof a === "string" && /VENDEDORES/i.test(a)) grupo = "Vendedores";
+    if (typeof a === "string" && /PROSPECTADORES/i.test(a)) grupo = "Prospectadores";
+    if (!nome || !funcao || /^NOME/i.test(nome) || /FUNÇÃO/i.test(funcao)) return;
+    const salario = num(l[3]) || 0, ajuda = num(l[4]) || 0;
+    if (!salario && !ajuda) return;
+    const loja = l[15] ? String(l[15]).trim().toLowerCase() : "";
+    docs.fixosBase.push({
+      id: "fo-" + slug(nome), nome, funcao, grupo, valor: salario, ajudaCusto: ajuda, extras: 0,
+      proLabore: /CEO|SOCIO|SÓCIO/i.test(funcao), ativo: true, tipo: "folha", diaVencimento: 5,
+      unidade: loja ? loja[0].toUpperCase() + loja.slice(1) : null
+    });
+  });
+}
+
 /* ============ conferência ============ */
 console.log(`\nArquivo: ${arquivo}\n`);
 console.log("mês      vendas   faturamento   faturam.planilha    lucro bruto   l.bruto planilha   diferença");
@@ -285,36 +318,38 @@ if (!GRAVAR) {
 }
 
 /* ============ gravação ============ */
-if (firebaseConfig.projectId === "COLE_AQUI") {
-  console.error("Cole a config do Firebase no topo deste arquivo antes de gravar.");
+const chave = pega("--chave");
+if (!chave) {
+  console.error("Falta --chave <caminho do .json da conta de serviço>.");
   process.exit(1);
 }
 
-const { initializeApp } = await import("firebase/app");
-const { getFirestore, doc, writeBatch } = await import("firebase/firestore");
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const { initializeApp, cert } = await import("firebase-admin/app");
+const { getFirestore, FieldValue } = await import("firebase-admin/firestore");
+initializeApp({ credential: cert(JSON.parse(fs.readFileSync(chave, "utf8"))) });
+const db = getFirestore();
+const agora = FieldValue.serverTimestamp();
 const raiz = `empresas/${EMPRESA}`;
 
-async function gravarLote(caminho, lista) {
+async function gravarLote(caminho, lista, comData = true) {
   for (let i = 0; i < lista.length; i += 400) {
-    const lote = writeBatch(db);
+    const lote = db.batch();
     lista.slice(i, i + 400).forEach(({ id, ...corpo }) =>
-      lote.set(doc(db, raiz, caminho, id), corpo));
+      lote.set(db.doc(`${raiz}/${caminho}/${id}`), comData ? { ...corpo, criadoEm: agora } : corpo));
     await lote.commit();
     console.log(`  ${caminho}: ${Math.min(i + 400, lista.length)}/${lista.length}`);
   }
 }
 
 console.log("Gravando…");
-// As linhas de custo padrão primeiro, com os mesmos ids usados acima.
-const lote0 = writeBatch(db);
-LINHAS_PADRAO.forEach((l, i) => lote0.set(doc(db, raiz, "linhasCusto", l.id),
+const lote0 = db.batch();
+LINHAS_PADRAO.forEach((l, i) => lote0.set(db.doc(`${raiz}/linhasCusto/${l.id}`),
   { nome: l.nome, padrao: l.id !== "obra", ordem: i + 1 }));
 await lote0.commit();
 
 await gravarLote("vendas", docs.vendas);
 await gravarLote("custos", docs.custos);
-await gravarLote("fechamentos", docs.fechamentos);
+await gravarLote("fechamentos", docs.fechamentos, false);
+await gravarLote("custosFixos", docs.fixosBase);
 console.log("\nPronto.\n");
 process.exit(0);
