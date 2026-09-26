@@ -412,7 +412,8 @@ let modeloAtual = null;
 function projecao() {
   const m = P.montarModelo(D.fechamentos, mesRefDe(hojeISO()));
   modeloAtual = m;
-  const cab = `${cabecalho("Projeção", "Com base no histórico da empresa", "")}${abasVisao()}`;
+  const ajuda = `<button class="btn icone ajuda" id="btn-ajuda-proj" aria-label="Como funcionam os insights" title="Como funciona">${ICONS.ajuda}</button>`;
+  const cab = `${cabecalho("Projeção", "Com base no histórico da empresa", ajuda)}${abasVisao()}`;
 
   if (!m.ok) {
     const fora = m.fora.filter(f => f.motivo !== "mês ainda em andamento");
@@ -572,6 +573,7 @@ function gravarConversao(v) { try { localStorage.setItem(chaveConv(), String(v))
 /* Calculadora ao vivo: recalcula e troca só os números, sem redesenhar a tela
    (redesenhar tiraria o cursor do campo a cada tecla). */
 function ligarProjecao() {
+  document.getElementById("btn-ajuda-proj")?.addEventListener("click", modalGuiaProjecao);
   const m = modeloAtual;
   if (!m?.ok) return;
   const $ = id => document.getElementById(id);
@@ -607,6 +609,107 @@ function ligarProjecao() {
     atualizar("fat");
   }));
   document.getElementById("btn-base-proj")?.addEventListener("click", () => modalBaseProjecao(m));
+}
+
+/* ============ GUIA: como funciona a projeção ("?") ============ */
+// Todo número deste texto sai de PARAMETROS (projecao.js). Não escrever limite
+// à mão aqui: se o cálculo mudar e o texto não, o guia passa a mentir.
+function modalGuiaProjecao() {
+  const R = P.PARAMETROS;
+  const pc = x => `${Math.round(x * 100)}%`;
+  const tab = (cab, linhas) => `<table class="guia-tab"><thead><tr>${cab.map(c => `<th>${c}</th>`).join("")}</tr></thead>
+    <tbody>${linhas.map(l => `<tr>${l.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const cor = t => `<span class="tag ${t === "ruim" ? "dn" : t === "bom" ? "up" : t === "atencao" ? "wr" : "nt"}">${{ ruim: "vermelho", bom: "verde", atencao: "amarelo", neutro: "neutro" }[t]}</span>`;
+
+  const corpo = `<div class="guia">
+    <section>
+      <h4>Para que serve</h4>
+      <p>A projeção usa o histórico da empresa para responder duas perguntas: <b>quanto sobra se eu faturar tanto</b>
+      e <b>quanto preciso faturar para sobrar tanto</b>. Ela não usa os números de um mês só: monta um modelo com os meses
+      que têm dado confiável, e recalcula sozinha quando um mês novo fecha.</p>
+    </section>
+
+    <section>
+      <h4>1. Quais meses entram na conta</h4>
+      <p>Antes de calcular, o sistema separa os meses bons dos mal preenchidos. Fica de fora:</p>
+      ${tab(["Mês", "Motivo"], [
+        ["Em andamento", "Ainda não fechou. O mês atual e os futuros nunca entram."],
+        ["Sem venda", "Nenhuma venda lançada."],
+        ["Sem custo fixo", "Nenhum custo fixo ou imposto lançado."],
+        ["Vendas sem custo", `Custo das vendas abaixo de ${pc(R.custoVendaMinimo)} do faturamento: o custo não foi lançado.`],
+        ["Custo das vendas fora do padrão", `Com pelo menos ${R.minMesesLimpeza} meses, o custo das vendas precisa estar a menos de ${Math.round(R.folgaCustoVenda * 100)} pontos da mediana dos outros meses (e a menos de ${R.fatorDesvio} desvios típicos). Fora disso, quase sempre há custo faltando ou lançado em dobro.`],
+        ["Custo fixo fora do padrão", `Custo fixo mais de ${pc(R.difFixoMax)} distante da mediana.`]
+      ])}
+      <p class="nota">Mês ruim não é mês mal preenchido: um mês que fechou no prejuízo, com custos lançados, continua na conta.
+      O botão <b>Ver os meses usados na conta</b> mostra cada mês e o motivo de quem ficou de fora. Com menos de
+      ${R.minMesesProjecao} meses aproveitáveis, a tela avisa que ainda não dá para projetar.</p>
+    </section>
+
+    <section>
+      <h4>2. Como o resultado é calculado</h4>
+      ${tab(["Item", "Como sai"], [
+        ["Custo das vendas, comissão e imposto", "Proporção sobre o faturamento, ponderada pelo tamanho de cada mês. Mês grande pesa mais que mês pequeno."],
+        ["Custo fixo e folha", `Média dos ${R.mesesFixoRecente} meses mais recentes usados. O fixo muda com o tempo, e o recente é o que vale para o próximo mês.`],
+        ["Custos não previstos", `Média dos ${R.mesesFixoRecente} meses mais recentes usados.`],
+        ["Ponto de equilíbrio", "(fixo + não previstos) ÷ o que sobra de cada real vendido depois de custo, comissão e imposto."],
+        ["Lucro líquido projetado", "Faturamento − custos das vendas − comissões − impostos − fixo − não previstos."]
+      ])}
+    </section>
+
+    <section>
+      <h4>3. O simulador</h4>
+      <p><b>Faturamento</b> e <b>quanto sobra</b> são ligados: você digita um e o outro se calcula. Com o <b>ticket médio</b>
+      o sistema define quantas vendas são necessárias, <b>sempre arredondando para cima</b> (meia venda não existe).
+      Dividindo essas vendas pela <b>conversão</b> das propostas, sai quantas propostas apresentar, e quantas por semana
+      (${String(R.semanasPorMes).replace(".", ",")} semanas por mês). A conversão que você digita fica guardada neste aparelho.</p>
+    </section>
+
+    <section>
+      <h4>4. A tendência</h4>
+      <p>O sistema traça uma reta pelo faturamento dos meses usados (a partir de ${R.minMesesTendencia} meses) e projeta
+      os próximos ${R.mesesProjetados}. <b>Só afirma tendência quando ela existe</b>: a reta precisa explicar pelo menos
+      ${pc(R.r2Min)} da variação e o faturamento precisa mudar pelo menos ${R.variacaoMinPct}% da média por mês. Senão, a tela diz
+      "sem tendência clara". Oscilação não é direção.</p>
+      ${tab(["Resultado", "Quando"], [
+        ["Crescendo e acima do equilíbrio", "Faturamento subindo e o nível de hoje já cobre o custo."],
+        ["Crescendo, ainda abaixo", "Subindo, mas abaixo do equilíbrio. A tela diz em quantos meses passa dele."],
+        ["Caindo, ainda acima", "Descendo, mas ainda acima. A tela diz em quantos meses chega no equilíbrio."],
+        ["Caindo e abaixo", "Descendo e abaixo do equilíbrio: o prejuízo tende a crescer."],
+        ["Sem tendência clara", "A variação é pequena ou irregular demais para afirmar direção."]
+      ])}
+    </section>
+
+    <section>
+      <h4>5. Os insights</h4>
+      <p>Cada insight é um cálculo sobre o histórico, com os números da própria empresa. Eles não variam com o
+      resultado de um mês: variam com o conjunto dos meses usados, e se atualizam quando um mês novo entra.</p>
+      ${tab(["Insight", "Quando aparece", "Cor"], [
+        ["Média x equilíbrio", "Sempre. Compara a média de faturamento com o ponto de equilíbrio.", `${cor("ruim")} média abaixo · ${cor("bom")} média acima`],
+        ["Custo de cada venda", "Quando sobra margem depois de custo, comissão e imposto.", `${cor("atencao")} custo + comissão acima de ${pc(R.limiteCustoVenda)} da venda · senão ${cor("neutro")}`],
+        ["Custo fixo", "Junto com o anterior.", `${cor("atencao")} fixo acima de ${pc(R.limiteFixoSobreFat)} do faturamento médio · senão ${cor("neutro")}`],
+        ["Ticket médio", "Junto com os dois anteriores.", `${cor("neutro")} sempre. Acrescenta "subindo" ou "caindo" se o ticket recente difere mais de ${pc(R.difTicket)} do geral`],
+        ["Custos não previstos", `Quando houve custo não previsto nos ${R.mesesFixoRecente} meses recentes.`, cor("atencao")],
+        ["Faturamento oscila muito", `Quando a variação entre meses passa de ${pc(R.limiteOscilacao)} da média.`, cor("atencao")],
+        ["Meses fora da conta", "Quando algum mês foi excluído por estar mal preenchido.", cor("neutro")]
+      ])}
+      <p class="nota">As simulações dentro dos textos (${Math.round(R.cenarioCusto * 100)} ponto a menos de custo, ${pc(R.cenarioFixo)} a menos de fixo,
+      ${pc(R.cenarioTicket)} a mais de ticket) são cenários de referência para dar a ordem de grandeza de cada alavanca. Não são metas.</p>
+    </section>
+
+    <section>
+      <h4>Limites e cuidados</h4>
+      <ul>
+        <li><b>Os limites de cor são referências de atenção</b>, não um padrão de mercado. Servem para chamar o olhar, e a leitura final é sua.</li>
+        <li><b>A projeção supõe custos proporcionais.</b> O custo das vendas, a comissão e o imposto acompanham o faturamento, e o custo fixo
+        fica no valor recente. Se você espera contratar, mudar de sede ou renegociar contratos, o fixo real será outro.</li>
+        <li><b>O resultado vale o que o lançamento vale.</b> Custo não lançado faz o mês parecer melhor do que foi.
+        Manter os custos em dia é o que mais melhora a projeção.</li>
+      </ul>
+    </section>
+  </div>`;
+
+  abrirModal(molduraModal("Como funciona a projeção", "Insights, parâmetros e como cada número é calculado", corpo,
+    `<button class="btn pri" data-fechar>Entendi</button>`, { largura: 780 }));
 }
 
 function modalBaseProjecao(m) {

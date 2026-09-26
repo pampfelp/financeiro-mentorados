@@ -10,6 +10,35 @@
 //  3. com isso responde "se eu faturar X, quanto sobra" e o contrário,
 //     "quanto preciso faturar pra sobrar Y".
 
+/* Todo número que decide algo mora aqui, e só aqui. O guia "?" da tela lê este
+   objeto: se um limite mudar, o texto que a pessoa lê muda junto. */
+export const PARAMETROS = {
+  // escolha dos meses
+  minMesesProjecao: 2,        // menos que isso, não projeta
+  minMesesLimpeza: 3,         // menos que isso, não dá pra julgar um mês contra os outros
+  custoVendaMinimo: 0.02,     // custo das vendas abaixo disso = vendas sem custo lançado
+  folgaCustoVenda: 0.15,      // diferença mínima (15 pontos) para excluir um mês por custo das vendas
+  fatorDesvio: 3,             // e, além dela, 3 desvios típicos da mediana
+  difFixoMax: 0.6,            // custo fixo 60% acima ou abaixo da mediana exclui o mês
+  // modelo
+  mesesFixoRecente: 3,        // o fixo vem dos N meses mais recentes
+  mesesProjetados: 3,
+  semanasPorMes: 4.33,
+  // tendência
+  minMesesTendencia: 3,
+  r2Min: 0.3,                 // quanto da variação a reta precisa explicar
+  variacaoMinPct: 2,          // variação mínima por mês (% da média) para afirmar tendência
+  // insights
+  limiteCustoVenda: 0.6,      // custo + comissão acima de 60% da venda
+  limiteFixoSobreFat: 0.3,    // fixo acima de 30% do faturamento médio
+  limiteOscilacao: 0.25,      // variação entre meses acima de 25% da média
+  difTicket: 0.05,            // ticket recente 5% diferente do geral
+  cenarioCusto: 0.01,         // "1 ponto a menos de custo"
+  cenarioFixo: 0.10,          // "10% a menos de fixo"
+  cenarioTicket: 0.10         // "10% a mais de ticket"
+};
+const PR = PARAMETROS;
+
 const MES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
   "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const nomeMes = m => MES[Number(m.slice(5, 7)) - 1];
@@ -46,7 +75,7 @@ export function separarMeses(fechamentos, mesAtual) {
     if (f.mes >= mesAtual)          fora.push({ ...item, motivo: "mês ainda em andamento" });
     else if (!(f.venda > 0))        fora.push({ ...item, motivo: "sem venda lançada" });
     else if (!(item.fixo + (f.imposto || 0) > 0)) fora.push({ ...item, motivo: "sem custo fixo lançado" });
-    else if (custoVenda < 0.02)     fora.push({ ...item, motivo: "vendas sem custo lançado" });
+    else if (custoVenda < PR.custoVendaMinimo) fora.push({ ...item, motivo: "vendas sem custo lançado" });
     else usados.push(item);
   }
 
@@ -54,16 +83,16 @@ export function separarMeses(fechamentos, mesAtual) {
   // custo que não foi lançado (ou lançado duas vezes). Só dá pra julgar com
   // três meses ou mais. A folga mínima de 15 pontos existe pra não jogar fora
   // um mês que foi ruim de verdade: ruim não é o mesmo que mal preenchido.
-  if (usados.length >= 3) {
+  if (usados.length >= PR.minMesesLimpeza) {
     const med = mediana(usados.map(f => f.custoVenda));
     const mad = mediana(usados.map(f => Math.abs(f.custoVenda - med)));
-    const limite = Math.max(0.15, 3 * 1.4826 * mad);
+    const limite = Math.max(PR.folgaCustoVenda, PR.fatorDesvio * 1.4826 * mad);
     const medFixo = mediana(usados.map(f => f.fixo));
     for (const f of [...usados]) {
       let motivo = null;
       if (Math.abs(f.custoVenda - med) > limite)
         motivo = `custo das vendas em ${pct(f.custoVenda)}, contra ${pct(med)} dos outros meses`;
-      else if (medFixo > 0 && Math.abs(f.fixo - medFixo) / medFixo > 0.6)
+      else if (medFixo > 0 && Math.abs(f.fixo - medFixo) / medFixo > PR.difFixoMax)
         motivo = `custo fixo muito diferente dos outros meses`;
       if (motivo) { usados.splice(usados.indexOf(f), 1); fora.push({ ...f, motivo }); }
     }
@@ -75,7 +104,7 @@ export function separarMeses(fechamentos, mesAtual) {
 /* ============ 2. o modelo ============ */
 export function montarModelo(fechamentos, mesAtual) {
   const { usados, fora } = separarMeses(fechamentos, mesAtual);
-  const base = { usados, fora, ok: usados.length >= 2 };
+  const base = { usados, fora, ok: usados.length >= PR.minMesesProjecao };
   if (!base.ok) return base;
 
   const soma = k => usados.reduce((s, f) => s + (f[k] || 0), 0);
@@ -91,7 +120,7 @@ export function montarModelo(fechamentos, mesAtual) {
 
   // Valores fixos do mês: os três meses mais recentes, porque fixo muda com o
   // tempo (contratação, aluguel) e o recente é o que vale pro próximo mês.
-  const recentes = usados.slice(-3);
+  const recentes = usados.slice(-PR.mesesFixoRecente);
   const fixo = recentes.reduce((s, f) => s + f.fixo, 0) / recentes.length;
   const naoPrevisto = recentes.reduce((s, f) => s + (f.naoPrevisto || 0), 0) / recentes.length;
 
@@ -143,7 +172,7 @@ export function funil(faturamento, ticket, conversaoPct) {
   const vendas = ticket > 0 ? Math.ceil(faturamento / ticket) : 0;
   const conv = conversaoPct > 0 ? conversaoPct / 100 : 0;
   const propostas = conv > 0 ? Math.ceil(vendas / conv) : 0;
-  return { vendas, propostas, propostasSemana: Math.ceil(propostas / 4.33) };
+  return { vendas, propostas, propostasSemana: Math.ceil(propostas / PR.semanasPorMes) };
 }
 
 /* ============ tendência ============ */
@@ -152,7 +181,7 @@ export function funil(faturamento, ticket, conversaoPct) {
 function tendencia(m, mesAtual) {
   const pts = m.usados.map(f => ({ x: idx(f.mes), y: f.venda }));
   const n = pts.length;
-  if (n < 3) return { ok: false, motivo: "poucos meses para uma tendência" };
+  if (n < PR.minMesesTendencia) return { ok: false, motivo: "poucos meses para uma tendência" };
   const mx = pts.reduce((s, p) => s + p.x, 0) / n, my = pts.reduce((s, p) => s + p.y, 0) / n;
   const sxx = pts.reduce((s, p) => s + (p.x - mx) ** 2, 0);
   const inclinacao = sxx ? pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / sxx : 0;
@@ -166,7 +195,7 @@ function tendencia(m, mesAtual) {
   // Projeta do mês atual pra frente. Mês que já passou sem dado não é
   // projeção, é lançamento que falta, e fica vazio no gráfico.
   const inicio = Math.max(ultimo + 1, mesAtual ? idx(mesAtual) : ultimo + 1);
-  const futuro = [0, 1, 2].map(k => {
+  const futuro = Array.from({ length: PR.mesesProjetados }, (_, k) => k).map(k => {
     const venda = Math.max(0, reta(inicio + k));
     return { mes: deIdx(inicio + k), venda, lucroLiquido: dreProjetada(m, venda).lucroLiquido };
   });
@@ -182,7 +211,7 @@ function tendencia(m, mesAtual) {
   // razoável da variação (r²) e a mudança precisa ser de verdade (2% ao mês).
   // Sem isso, dizer "caindo" por causa de uma inclinação de -0,4% seria ler
   // ruído como direção.
-  if (r2 < 0.3 || Math.abs(variacaoMensal) < 2) {
+  if (r2 < PR.r2Min || Math.abs(variacaoMensal) < PR.variacaoMinPct) {
     const naMedia = m.mediaVenda >= m.equilibrio;
     return {
       ok: true, inclinacao, r2, futuro, variacaoMensal, fraca: true, reta: x => reta(idx(x)),
@@ -231,15 +260,15 @@ function insights(m) {
 
   const pVar = m.pCusto + m.pComissao;
   if (mc > 0) {
-    const eqMenos = (m.fixo + m.naoPrevisto) / (mc + 0.01);
-    out.push({ tipo: pVar > 0.6 ? "atencao" : "neutro", titulo: "Custo de cada venda",
-      texto: `De cada R$ 100 vendidos, R$ ${(pVar * 100).toFixed(0)} vão para o custo do projeto e a comissão. Baixar 1 ponto nisso rende ${brl(R * 0.01)} a mais por mês na média atual e reduz o ponto de equilíbrio para ${brl(eqMenos)}.` });
-    const eqFixo = (m.fixo * 0.9 + m.naoPrevisto) / mc;
-    out.push({ tipo: m.fixo / R > 0.3 ? "atencao" : "neutro", titulo: "Custo fixo",
-      texto: `O fixo recente é ${brl(m.fixo)} por mês, ${pct(m.fixo / R)} do faturamento médio. Cortar 10% dele (${brl(m.fixo * 0.1)}) baixa o ponto de equilíbrio para ${brl(eqFixo)}.` });
+    const eqMenos = (m.fixo + m.naoPrevisto) / (mc + PR.cenarioCusto);
+    out.push({ tipo: pVar > PR.limiteCustoVenda ? "atencao" : "neutro", titulo: "Custo de cada venda",
+      texto: `De cada R$ 100 vendidos, R$ ${(pVar * 100).toFixed(0)} vão para o custo do projeto e a comissão. Baixar 1 ponto nisso rende ${brl(R * PR.cenarioCusto)} a mais por mês na média atual e reduz o ponto de equilíbrio para ${brl(eqMenos)}.` });
+    const eqFixo = (m.fixo * (1 - PR.cenarioFixo) + m.naoPrevisto) / mc;
+    out.push({ tipo: m.fixo / R > PR.limiteFixoSobreFat ? "atencao" : "neutro", titulo: "Custo fixo",
+      texto: `O fixo recente é ${brl(m.fixo)} por mês, ${pct(m.fixo / R)} do faturamento médio. Cortar ${Math.round(PR.cenarioFixo * 100)}% dele (${brl(m.fixo * PR.cenarioFixo)}) baixa o ponto de equilíbrio para ${brl(eqFixo)}.` });
     out.push({ tipo: "neutro", titulo: "Ticket médio",
-      texto: `O ticket médio é ${brl(m.ticket)}${m.ticketRecente && Math.abs(m.ticketRecente / m.ticket - 1) > 0.05
-        ? `, e nos meses mais recentes está em ${brl(m.ticketRecente)} (${m.ticketRecente > m.ticket ? "subindo" : "caindo"})` : ""}. Subir 10% no ticket, com o mesmo número de vendas, deixa ${brl(R * 0.1 * mc)} a mais por mês.` });
+      texto: `O ticket médio é ${brl(m.ticket)}${m.ticketRecente && Math.abs(m.ticketRecente / m.ticket - 1) > PR.difTicket
+        ? `, e nos meses mais recentes está em ${brl(m.ticketRecente)} (${m.ticketRecente > m.ticket ? "subindo" : "caindo"})` : ""}. Subir ${Math.round(PR.cenarioTicket * 100)}% no ticket, com o mesmo número de vendas, deixa ${brl(R * PR.cenarioTicket * mc)} a mais por mês.` });
   }
 
   if (m.naoPrevisto > 0 && R * mc > 0)
@@ -247,7 +276,7 @@ function insights(m) {
       texto: `Retrabalho e custo sem venda levam ${brl(m.naoPrevisto)} por mês, ${pct(m.naoPrevisto / (R * (1 - pVar)))} do lucro bruto médio.` });
 
   const desvio = Math.sqrt(m.usados.reduce((s, f) => s + (f.venda - R) ** 2, 0) / m.usados.length);
-  if (R && desvio / R > 0.25)
+  if (R && desvio / R > PR.limiteOscilacao)
     out.push({ tipo: "atencao", titulo: "Faturamento oscila muito",
       texto: `De um mês para o outro o faturamento varia em torno de ${pct(desvio / R)}. Planeje o custo fixo pelo mês fraco, não pela média.` });
 

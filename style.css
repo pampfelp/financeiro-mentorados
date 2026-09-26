@@ -521,3 +521,23 @@ input[type=checkbox]{width:auto;height:auto}
   .sim-par{grid-template-columns:1fr}
   .sim-seta{display:none}
 }
+
+/* ---------- guia da projeção ("?") ---------- */
+.btn.ajuda{width:36px;padding:0;justify-content:center;color:var(--dourado);border-color:rgba(254,209,22,.35)}
+.btn.ajuda:hover{background:var(--dourado-soft)}
+.btn.ajuda svg{width:19px;height:19px}
+.guia{display:flex;flex-direction:column;gap:22px}
+.guia h4{font-family:var(--display);font-size:13.5px;font-weight:700;margin-bottom:8px;color:var(--dourado);letter-spacing:.2px}
+.guia p{font-size:13px;line-height:1.6;color:var(--ink-soft);margin-bottom:8px}
+.guia p b,.guia li b{color:var(--ink)}
+.guia .nota{font-size:12.5px;padding-left:12px;border-left:2px solid var(--line);color:var(--ink-faint)}
+.guia-tab{width:100%;border-collapse:collapse;margin:6px 0 10px}
+.guia-tab th{text-align:left;font-size:10.5px;padding:0 10px 7px 0;border-bottom:1px solid var(--line)}
+.guia-tab td{padding:8px 10px 8px 0;font-size:12.5px;line-height:1.5;color:var(--ink-soft);border-bottom:1px solid var(--line);vertical-align:top}
+.guia-tab td:first-child{font-weight:600;color:var(--ink);width:26%}
+.guia-tab tr:last-child td{border-bottom:0}
+.guia ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+.guia li{position:relative;padding-left:16px;font-size:13px;line-height:1.55;color:var(--ink-soft)}
+.guia li::before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;border-radius:50%;background:var(--dourado)}
+.modal .cnt:has(.guia){padding:20px 24px}
+@media(max-width:900px){.guia-tab td:first-child{width:34%}.guia-tab td,.guia-tab th{padding-right:8px}}

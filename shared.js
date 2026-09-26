@@ -106,6 +106,7 @@ export const ICONS = {
   check: svg(`<path d="M20 6L9 17l-5-5"/>`),
   compartilhar: svg(`<path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/>`),
   celular: svg(`<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>`),
+  ajuda: svg(`<circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 015 1c0 1.7-2.5 2.2-2.5 3.8"/><path d="M12 17.2h.01"/>`),
   pessoas: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>`),
   pessoaMais: svg(`<path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>`),
   chave: svg(`<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3l1.5 1.5-2 2 1.5 1.5-2 2-1.5-1.5-2.8 2.8"/>`)
