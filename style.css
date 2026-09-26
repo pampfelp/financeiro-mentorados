@@ -485,3 +485,39 @@ input[type=checkbox]{width:auto;height:auto}
   .tabbar{bottom:max(14px,env(safe-area-inset-bottom))}
   .top{padding-top:max(14px,env(safe-area-inset-top))}
 }
+
+/* ---------- projeção ---------- */
+.lab-sec{font-size:11.5px;color:var(--ink-faint);letter-spacing:.4px;text-transform:uppercase;margin-bottom:12px}
+.sim-par{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:end}
+.sim-par:has(> :nth-child(2):last-child){grid-template-columns:1fr 1fr}
+.sim-seta{color:var(--dourado);font-size:18px;padding-bottom:9px}
+.chips-sim{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.chips-sim .chip{height:28px;font-size:12px}
+.sim-res{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;padding:14px 16px;border-radius:12px;
+  background:var(--panel-2);border:1px solid var(--line)}
+.sim-res .l{font-size:11.5px;color:var(--ink-faint)}
+.sim-res .v{font-family:var(--mono);font-size:26px;font-weight:600;margin:3px 0}
+.sim-res .v.gold{color:var(--dourado)}
+.aviso-sim{margin-top:10px;font-size:12.5px;color:var(--debit);padding-left:12px;border-left:2px solid var(--debit)}
+.leg-mini{font-size:11.5px;color:var(--ink-faint);display:flex;align-items:center;gap:5px}
+.leg-mini i{width:10px;height:10px;border-radius:2px;display:inline-block}
+.leg-mini i.caixa{border:1.5px dashed var(--ink-faint);background:none}
+.leg-mini i.linha-t{height:0;width:16px;border-radius:0;border-top:2px dashed var(--dourado)}
+.leg-mini i.linha-e{height:0;width:16px;border-radius:0;border-top:1.5px dotted var(--warn)}
+.veredito{margin-top:10px;padding:11px 14px;border-radius:11px;font-size:13.5px;line-height:1.5;border:1px solid var(--line)}
+.veredito.bom{background:var(--credit-soft);border-color:rgba(34,197,94,.3)}
+.veredito.atencao{background:var(--warn-soft);border-color:rgba(245,158,11,.3)}
+.veredito.ruim{background:var(--debit-soft);border-color:rgba(239,68,68,.3)}
+.insights{display:flex;flex-direction:column}
+.insight{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.insight:last-child{border-bottom:0}
+.insight>i{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:none;background:var(--ink-faint)}
+.insight.ruim>i{background:var(--debit)}
+.insight.atencao>i{background:var(--warn)}
+.insight.bom>i{background:var(--credit)}
+.insight b{font-size:13.5px;display:block;margin-bottom:3px}
+.insight p{font-size:13px;color:var(--ink-soft);line-height:1.55}
+@media(max-width:900px){
+  .sim-par{grid-template-columns:1fr}
+  .sim-seta{display:none}
+}

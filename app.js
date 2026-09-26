@@ -7,6 +7,7 @@
 import { SESSAO, SENHA_INICIAL, iniciarAuth, sair, podeEditar, ehJornada,
   criarContaAuth, enviarLinkDeSenha } from "./auth.js";
 import * as DB from "./dados.js";
+import * as P from "./projecao.js";
 import { D } from "./dados.js";
 import {
   esc, moeda, moedaCurta, pct, numero, ICONS, toast, abrirModal, fecharModal,
@@ -27,6 +28,8 @@ const S = {
   unidade: "todas",
   zoom: "mes",        // "ano" | "mes" — nível do gráfico de linha em Vendas
   abaFixos: "fixo",
+  abaVisao: "realizado",   // "realizado" | "projecao"
+  sim: null,               // valores do simulador da projeção
   filtroCusto: "todos",
   pronto: false
 };
@@ -134,7 +137,10 @@ function render() {
   // Telas que dependem do mês esperam ele chegar do banco. Sem isso a tela
   // pisca o estado "nada lançado" antes de mostrar os dados.
   const soJornadaSemEmpresa = ehJornada() && !SESSAO.empresaId;
-  if (!soJornadaSemEmpresa && ["visao", "vendas", "pend", "custos"].includes(S.tela) && !DB.mesCarregado()) {
+  const naProjecao = S.tela === "visao" && S.abaVisao === "projecao";
+  document.getElementById("pil-mes").classList.toggle("oculto", soJornada || naProjecao);
+  document.getElementById("pil-unidade").classList.toggle("oculto", soJornada || naProjecao);
+  if (!soJornadaSemEmpresa && !naProjecao && ["visao", "vendas", "pend", "custos"].includes(S.tela) && !DB.mesCarregado()) {
     S.carregandoTela = true;
     pintar(faixaVisualizacao() + carregando());
     return;
@@ -300,6 +306,7 @@ function rosca(r) {
 
 /* ============ TELA: VISÃO GERAL ============ */
 function visao() {
+  if (S.abaVisao === "projecao") return projecao();
   const r = resumo();
   const serie = DB.serieDoAno(anoDe(S.mesRef)).filter(p => p.temDado);
   const iAtual = serie.findIndex(p => p.mesRef === S.mesRef);
@@ -322,10 +329,13 @@ function visao() {
   }).join("");
 
   if (!D.vendas.length && !D.custos.length) {
+    // O botão chama o mesmo id da tela de Vendas. Antes usava data-ir, que só
+    // ganha clique no menu lateral: aqui dentro ele não fazia nada.
     return `${cabecalho(rotuloPeriodo(), D.empresa?.nome || "", "")}
+      ${abasVisao()}
       ${vazioTela("Nada lançado neste mês ainda",
         "Comece cadastrando as vendas do mês. Os custos de cada uma entram dentro dela.",
-        podeEditar() ? `<button class="btn pri" data-ir="vendas">${ICONS.mais}Ir para Vendas</button>` : "")}`;
+        podeEditar() ? `<button class="btn pri" id="btn-nova-venda">${ICONS.mais}Nova venda</button>` : "")}`;
   }
 
   const l = (k, nome, valor, neg) =>
@@ -334,6 +344,7 @@ function visao() {
 
   return `${cabecalho(rotuloPeriodo(), D.empresa?.nome || "",
     `<button class="btn" id="btn-dre">${ICONS.baixar}Exportar DRE</button>`)}
+  ${abasVisao()}
 
   <div class="grid anim" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;animation-delay:.04s">
     ${kpi("Faturamento do mês", moeda(r.venda),
@@ -384,6 +395,238 @@ function visao() {
       </div>
     </div>
   </div>`;
+}
+
+function abasVisao() {
+  return `<div class="tabs anim">
+    <button class="${S.abaVisao !== "projecao" ? "on" : ""}" data-visao="realizado">Realizado</button>
+    <button class="${S.abaVisao === "projecao" ? "on" : ""}" data-visao="projecao">Projeção</button>
+  </div>`;
+}
+
+/* ============ SUBTELA: PROJEÇÃO ============ */
+// Não usa o mês em foco: usa os fechamentos de todos os meses, depois de tirar
+// os que estão mal preenchidos (ver projecao.js).
+let modeloAtual = null;
+
+function projecao() {
+  const m = P.montarModelo(D.fechamentos, mesRefDe(hojeISO()));
+  modeloAtual = m;
+  const cab = `${cabecalho("Projeção", "Com base no histórico da empresa", "")}${abasVisao()}`;
+
+  if (!m.ok) {
+    const fora = m.fora.filter(f => f.motivo !== "mês ainda em andamento");
+    return `${cab}${vazioTela("Ainda não dá para projetar",
+      `A projeção precisa de pelo menos dois meses completos, com vendas e custos lançados. ${
+        m.usados.length === 1 ? "Hoje há um." : "Hoje não há nenhum."}${
+        fora.length ? " Fora da conta: " + fora.map(f => `${nomeMesRef(f.mes)} (${f.motivo})`).join("; ") + "." : ""}`)}`;
+  }
+
+  // valores iniciais do simulador: a média dos meses usados
+  if (!S.sim) S.sim = {
+    faturamento: Math.round(m.mediaVenda / 1000) * 1000,
+    ticket: Math.round(m.ticket),
+    conversao: lerConversao()
+  };
+  const d = P.dreProjetada(m, S.sim.faturamento);
+  const f = P.funil(S.sim.faturamento, S.sim.ticket, S.sim.conversao);
+  const pctMc = m.margemContribuicao * 100;
+  const periodo = `${nomeMesRef(m.usados[0].mes).split(" de ")[0]} a ${nomeMesRef(m.usados[m.usados.length - 1].mes)}`;
+
+  return `${cab}
+  <div class="grid anim" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px;animation-delay:.04s">
+    ${kpi("Ponto de equilíbrio", isFinite(m.equilibrio) ? moeda(m.equilibrio) : "—",
+      "faturamento por mês para empatar", { cor: m.mediaVenda < m.equilibrio ? "var(--warn)" : undefined })}
+    ${kpi("Faturamento médio", moeda(m.mediaVenda), `${m.usados.length} meses, ${esc(periodo)}`)}
+    ${kpi("Ticket médio", moeda(m.ticket), m.ticketRecente
+      ? `nos últimos meses: ${moeda(m.ticketRecente)}` : `${m.nVendas} vendas na base`)}
+    ${kpi("De cada R$ 100 vendidos", `R$ ${numero(pctMc, 0)}`, "sobram para pagar o fixo e dar lucro",
+      { cor: pctMc > 0 ? "var(--dourado)" : "var(--debit)" })}
+  </div>
+
+  <div class="grid anim" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);margin-bottom:14px;animation-delay:.08s">
+    <div class="card">
+      <div class="lab-sec">Simular um mês</div>
+      <div class="sim-par">
+        <label class="campo"><span>Faturamento do mês</span>
+          <input class="num-in" id="sim-fat" inputmode="decimal" value="${numero(S.sim.faturamento, 0)}"></label>
+        <span class="sim-seta" aria-hidden="true">⇄</span>
+        <label class="campo"><span>Quanto sobra no fim (lucro líquido)</span>
+          <input class="num-in" id="sim-lucro" inputmode="decimal" value="${numero(d.lucroLiquido, 0)}"></label>
+      </div>
+      <div class="chips-sim">
+        ${isFinite(m.equilibrio) ? `<button class="chip" data-sim-fat="${Math.ceil(m.equilibrio)}">Empatar</button>` : ""}
+        <button class="chip" data-sim-fat="${Math.round(m.mediaVenda)}">Média dos meses</button>
+        <button class="chip" data-sim-fat="${Math.round(m.melhorMes.venda)}">Melhor mês</button>
+        <button class="chip" data-sim-fat="${Math.round(m.mediaVenda * 1.2)}">Média + 20%</button>
+      </div>
+      <div class="sim-par" style="margin-top:14px">
+        <label class="campo"><span>Ticket médio</span>
+          <input class="num-in" id="sim-ticket" inputmode="decimal" value="${numero(S.sim.ticket, 0)}"></label>
+        <label class="campo"><span>Conversão das propostas (%)</span>
+          <input class="num-in" id="sim-conv" inputmode="decimal" value="${numero(S.sim.conversao, 0)}"></label>
+      </div>
+      <div class="sim-res">
+        <div><div class="l">Vendas no mês</div><div class="v" id="sim-vendas">${f.vendas}</div></div>
+        <div><div class="l">Propostas a apresentar</div><div class="v gold" id="sim-propostas">${f.propostas || "—"}</div>
+          <div class="l" id="sim-semana">${f.propostas ? `cerca de ${f.propostasSemana} por semana` : "informe a conversão"}</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lab-sec">Resultado projetado</div>
+      <div class="dre" id="sim-dre">${drePrevista(d, m)}</div>
+    </div>
+  </div>
+
+  <div class="card anim" style="margin-bottom:14px;animation-delay:.12s">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+      <div class="lab-sec" style="flex:1;margin:0">Tendência</div>
+      <span class="leg-mini"><i style="background:var(--credit)"></i>mês com lucro</span>
+      <span class="leg-mini"><i style="background:var(--debit)"></i>mês com prejuízo</span>
+      <span class="leg-mini"><i class="caixa"></i>projeção</span>
+      <span class="leg-mini"><i class="linha-t"></i>tendência</span>
+      <span class="leg-mini"><i class="linha-e"></i>ponto de equilíbrio</span>
+    </div>
+    ${m.tendencia.ok ? graficoTendencia(m) : ""}
+    <div class="veredito ${m.tendencia.ok ? m.tendencia.estado : "neutro"}">${esc(m.tendencia.ok ? m.tendencia.texto
+      : "Com menos de três meses completos ainda não dá para traçar uma tendência.")}</div>
+  </div>
+
+  <div class="card anim" style="animation-delay:.16s">
+    <div class="lab-sec">O que olhar para melhorar o resultado</div>
+    <div class="insights">${m.insights.map(i => `<div class="insight ${i.tipo}">
+      <i></i><div><b>${esc(i.titulo)}</b><p>${esc(i.texto)}</p></div></div>`).join("")}</div>
+    <button class="btn plano mini" id="btn-base-proj" style="margin-top:10px">Ver os meses usados na conta</button>
+  </div>`;
+}
+
+function drePrevista(d, m) {
+  const linha = (n, v, neg) => `<div class="row ${neg ? "neg" : ""}"><div class="nm">${n}</div>
+    <div class="vl">${neg ? "− " : ""}${moeda(v)}</div></div>`;
+  const abaixo = d.faturamento < m.equilibrio;
+  return `${linha("Faturamento", d.faturamento)}
+    ${linha("Custos das vendas", d.custo, true)}
+    ${linha("Comissões", d.comissao, true)}
+    <div class="row tot"><div class="nm">LUCRO BRUTO</div><div class="vl">${moeda(d.lucroBruto)}</div><span class="tag nt">${pct(d.margemBruta)}</span></div>
+    ${linha("Impostos", d.imposto, true)}
+    ${linha("Custos fixos e folha", d.fixo, true)}
+    ${d.naoPrevisto ? linha("Custos não previstos", d.naoPrevisto, true) : ""}
+    <div class="row tot gold"><div class="nm">LUCRO LÍQUIDO</div>
+      <div class="vl" style="color:${d.lucroLiquido < 0 ? "var(--debit)" : "var(--dourado)"}">${moeda(d.lucroLiquido)}</div>
+      <span class="tag ${d.lucroLiquido < 0 ? "dn" : "up"}">${pct(d.margemLiquida)}</span></div>
+    ${abaixo && isFinite(m.equilibrio) ? `<div class="aviso-sim">Abaixo do ponto de equilíbrio de ${moeda(m.equilibrio)}: o mês fecha no prejuízo.</div>` : ""}`;
+}
+
+function graficoTendencia(m) {
+  const t = m.tendencia;
+  const W = 1000, H = 230, PL = 58, PR = 150, PT = 18, PB = 30;
+  const hist = [...m.usados.map(f => ({ ...f, usado: true })), ...m.fora
+    .filter(f => f.motivo !== "mês ainda em andamento").map(f => ({ ...f, usado: false }))]
+    .sort((a, b) => a.mes.localeCompare(b.mes));
+  const reais = [...hist.map(f => ({ mes: f.mes, venda: f.venda, ll: f.lucroLiquido, usado: f.usado, futuro: false })),
+    ...t.futuro.map(f => ({ mes: f.mes, venda: f.venda, ll: f.lucroLiquido, usado: true, futuro: true }))];
+  // Eixo em meses corridos: mês sem dado entre dois meses aparece vazio, em vez
+  // de o gráfico encostar julho em setembro como se agosto não existisse.
+  const nIdx = mr => Number(mr.slice(0, 4)) * 12 + Number(mr.slice(5, 7)) - 1;
+  const deI = i => `${Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, "0")}`;
+  const porMes = Object.fromEntries(reais.map(p => [p.mes, p]));
+  const a0 = nIdx(reais[0].mes), a1 = nIdx(reais[reais.length - 1].mes);
+  const pontos = Array.from({ length: a1 - a0 + 1 }, (_, k) => porMes[deI(a0 + k)] || { mes: deI(a0 + k), vazio: true, venda: 0 });
+  const eq = isFinite(m.equilibrio) ? m.equilibrio : 0;
+  const max = Math.max(eq, ...pontos.map(p => p.venda)) * 1.12 || 1;
+  const iw = W - PL - PR, ih = H - PT - PB, n = pontos.length, passo = iw / n;
+  const y = v => PT + ih - v / max * ih;
+  const xC = i => PL + passo * i + passo / 2;
+  const bw = Math.min(46, passo * .56);
+
+  const barras = pontos.map((p, i) => {
+    if (p.vazio) return `<text class="xl" x="${xC(i)}" y="${PT + ih - 6}">sem dado</text>`;
+    const cor = p.ll < 0 ? "var(--debit)" : "var(--credit)";
+    const alt = Math.max(2, PT + ih - y(p.venda));
+    return p.futuro
+      ? `<rect x="${xC(i) - bw / 2}" y="${y(p.venda)}" width="${bw}" height="${alt}" rx="4" fill="none" stroke="${cor}" stroke-width="1.6" stroke-dasharray="4 4"/>`
+      : `<rect x="${xC(i) - bw / 2}" y="${y(p.venda)}" width="${bw}" height="${alt}" rx="4" fill="${cor}" opacity="${p.usado ? .78 : .22}"/>
+         ${p.usado ? "" : `<text class="xl" x="${xC(i)}" y="${y(p.venda) - 6}">fora</text>`}`;
+  }).join("");
+
+  const idxUsados = pontos.map((p, i) => p.usado && !p.vazio ? i : -1).filter(i => i >= 0);
+  const i0 = idxUsados[0], i1 = pontos.length - 1;
+  const reta = `<line x1="${xC(i0)}" y1="${y(t.reta(pontos[i0].mes))}" x2="${xC(i1)}" y2="${y(Math.max(0, t.reta(pontos[i1].mes)))}"
+      stroke="var(--dourado)" stroke-width="2" stroke-dasharray="7 6"/>`;
+  const linhaEq = eq ? `<line x1="${PL}" x2="${W - PR + 10}" y1="${y(eq)}" y2="${y(eq)}" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="3 4"/>
+      <text class="yl" x="${W - PR + 16}" y="${y(eq) - 4}" style="text-anchor:start;fill:var(--warn)">equilíbrio</text>
+      <text class="yl" x="${W - PR + 16}" y="${y(eq) + 11}" style="text-anchor:start;fill:var(--warn)">${moedaCurta(eq)}</text>` : "";
+  const rot = pontos.map((p, i) => `<text class="xl" x="${xC(i)}" y="${H - 9}">${MES_CURTO[Number(p.mes.slice(5)) - 1]}</text>`).join("");
+  const grade = [0, .5, 1].map(fr => `<line class="gl" x1="${PL}" x2="${W - PR}" y1="${PT + ih - fr * ih}" y2="${PT + ih - fr * ih}"/>
+      <text class="yl" x="${PL - 9}" y="${PT + ih - fr * ih + 3.5}">${fr ? moedaCurta(max * fr).replace("R$ ", "") : "0"}</text>`).join("");
+  return `<div class="lc"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">
+    ${grade}${barras}${linhaEq}${reta}${rot}</svg></div>`;
+}
+
+/* A conversão digitada fica guardada neste navegador, por empresa. */
+function chaveConv() { return "fmj_conv_" + (SESSAO.empresaId || ""); }
+function lerConversao() { try { return Number(localStorage.getItem(chaveConv())) || 25; } catch { return 25; } }
+function gravarConversao(v) { try { localStorage.setItem(chaveConv(), String(v)); } catch {} }
+
+/* Calculadora ao vivo: recalcula e troca só os números, sem redesenhar a tela
+   (redesenhar tiraria o cursor do campo a cada tecla). */
+function ligarProjecao() {
+  const m = modeloAtual;
+  if (!m?.ok) return;
+  const $ = id => document.getElementById(id);
+  const fat = $("sim-fat"), luc = $("sim-lucro"), tic = $("sim-ticket"), conv = $("sim-conv");
+
+  const atualizar = (origem) => {
+    if (origem === "lucro") {
+      const alvo = lerValor(luc.value);
+      const R = P.faturamentoPara(m, alvo);
+      S.sim.faturamento = isFinite(R) ? Math.max(0, R) : 0;
+      fat.value = numero(S.sim.faturamento, 0);
+    } else if (origem === "fat") {
+      S.sim.faturamento = Math.max(0, lerValor(fat.value));
+    }
+    S.sim.ticket = Math.max(0, lerValor(tic.value));
+    S.sim.conversao = Math.min(100, Math.max(0, lerValor(conv.value)));
+    const d = P.dreProjetada(m, S.sim.faturamento);
+    if (origem !== "lucro") luc.value = numero(d.lucroLiquido, 0);
+    const f = P.funil(S.sim.faturamento, S.sim.ticket, S.sim.conversao);
+    $("sim-vendas").textContent = f.vendas;
+    $("sim-propostas").textContent = f.propostas || "—";
+    $("sim-semana").textContent = f.propostas ? `cerca de ${f.propostasSemana} por semana` : "informe a conversão";
+    $("sim-dre").innerHTML = drePrevista(d, m);
+  };
+  fat.addEventListener("input", () => atualizar("fat"));
+  luc.addEventListener("input", () => atualizar("lucro"));
+  tic.addEventListener("input", () => atualizar("outro"));
+  conv.addEventListener("input", () => { atualizar("outro"); gravarConversao(S.sim.conversao); });
+  // ao sair do campo, mostra o número formatado
+  [fat, luc, tic].forEach(el => el.addEventListener("blur", () => { el.value = numero(lerValor(el.value), 0); }));
+  document.querySelectorAll("[data-sim-fat]").forEach(b => b.addEventListener("click", () => {
+    fat.value = numero(Number(b.dataset.simFat), 0);
+    atualizar("fat");
+  }));
+  document.getElementById("btn-base-proj")?.addEventListener("click", () => modalBaseProjecao(m));
+}
+
+function modalBaseProjecao(m) {
+  const linhas = [...m.usados.map(f => ({ ...f, usado: true })), ...m.fora.map(f => ({ ...f, usado: false }))]
+    .sort((a, b) => a.mes.localeCompare(b.mes)).map(f => `<tr>
+      <td style="padding-left:20px"><div class="nm2">${esc(nomeMesRef(f.mes))}</div>
+        ${f.usado ? "" : `<div style="color:var(--ink-faint);font-size:11.5px;margin-top:2px">${esc(f.motivo)}</div>`}</td>
+      <td class="r mono">${moeda(f.venda)}</td>
+      <td class="r mono">${numero(f.custoVenda * 100, 1)}%</td>
+      <td class="r" style="padding-right:20px">${f.usado ? `<span class="tag up">usado</span>` : `<span class="tag nt">fora</span>`}</td>
+    </tr>`).join("");
+  abrirModal(molduraModal("Meses usados na projeção", "Só entram meses completos e bem preenchidos", `
+    <table><thead><tr><th style="padding-left:20px">Mês</th><th class="r">Faturamento</th>
+      <th class="r">Custo das vendas</th><th class="r" style="padding-right:20px"></th></tr></thead><tbody>${linhas}</tbody></table>
+    <div class="txt" style="font-size:12.5px;margin:16px 20px 4px;padding-left:12px;border-left:2px solid var(--line)">
+      Fica fora o mês em andamento, o mês sem venda ou sem custo fixo, e o mês em que o custo das vendas foge muito
+      dos outros, o que quase sempre é custo não lançado. As proporções de custo, comissão e imposto saem dos meses
+      usados; o custo fixo sai dos três mais recentes.</div>`,
+    `<button class="btn" data-fechar>Fechar</button>`, { largura: 620 }));
+  document.querySelector("#modal .cnt").style.padding = "6px 0 12px";
 }
 
 function cabecalho(titulo, sub, acoes) {
@@ -1065,6 +1308,8 @@ function ligar() {
   liga("btn-novo-custo", () => modalCusto(null));
   liga("btn-novo-fixo", () => modalFixo(null));
   liga("btn-dre", exportarDRE);
+  q("[data-visao]").forEach(b => b.addEventListener("click", () => { S.abaVisao = b.dataset.visao; render(); }));
+  if (S.tela === "visao" && S.abaVisao === "projecao") ligarProjecao();
   liga("btn-nova-empresa", modalEmpresa);
   liga("btn-voltar-mentorados", voltarAosMentorados);
   q("[data-ver]").forEach(tr => tr.addEventListener("click", () => abrirEmpresa(tr.dataset.ver)));

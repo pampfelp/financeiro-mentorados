@@ -203,7 +203,8 @@ export function serieDoAno(ano) {
       venda: vivo ? vivo.venda : (f?.venda || 0),
       lucroBruto: vivo ? vivo.lucroBruto : (f?.lucroBruto || 0),
       lucroLiquido: vivo ? vivo.lucroLiquido : (f?.lucroLiquido || 0),
-      temDado: !!(f || vivo?.nVendas)
+      // fechamento todo zerado é rastro de quem abriu o mês sem lançar nada
+      temDado: !!((f && (f.venda || f.nVendas || f.fixos || f.imposto)) || vivo?.nVendas)
     };
   });
 }

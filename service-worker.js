@@ -8,7 +8,7 @@
 //    offline dos outros apps;
 //  - caches.match() sem abrir o próprio cache procuraria nos de todos.
 // Suba o número de CACHE a cada mudança relevante de asset estático.
-const CACHE = "fmj-v2";
+const CACHE = "fmj-v3";
 const PREFIXO = "fmj-";
 const SHELL = ["./", "./index.html", "./style.css", "./manifest.json",
   "./img/bussola.png", "./img/wordmark.png"];
